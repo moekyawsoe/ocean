@@ -277,7 +277,10 @@ pub fn is_likely_zawgyi(s: &str) -> bool {
             let prev = if idx > 0 { Some(chars[idx - 1]) } else { None };
             match prev {
                 None => zg_score += 4,
-                Some(p) if !is_myanmar_char(p) || matches!(p, '၊' | '။' | '\u{1038}' | '\u{102C}' | '\u{102B}') => {
+                Some(p)
+                    if !is_myanmar_char(p)
+                        || matches!(p, '၊' | '။' | '\u{1038}' | '\u{102C}' | '\u{102B}') =>
+                {
                     zg_score += 3;
                 }
                 _ => {}
@@ -288,7 +291,9 @@ pub fn is_likely_zawgyi(s: &str) -> bool {
             let next = chars.get(idx + 1).copied();
             match next {
                 None => zg_score += 3,
-                Some(n) if !is_myanmar_char(n) || matches!(n, '\u{1038}' | '\u{1037}' | '၊' | '။') => {
+                Some(n)
+                    if !is_myanmar_char(n) || matches!(n, '\u{1038}' | '\u{1037}' | '၊' | '။') =>
+                {
                     zg_score += 3;
                 }
                 Some('\u{1000}'..='\u{1021}') => {
@@ -423,9 +428,7 @@ pub fn zawgyi_to_unicode(input: &str) -> String {
             // Check if Kinzi marker follows base consonant (in Zawgyi, kinzi was stored after base)
             let mut has_kinzi = false;
             let mut extra = Vec::new();
-            while i < mapped.len()
-                && (mapped[i] == '\u{FFFF}' || utn11_mark_rank(mapped[i]) > 0)
-            {
+            while i < mapped.len() && (mapped[i] == '\u{FFFF}' || utn11_mark_rank(mapped[i]) > 0) {
                 if mapped[i] == '\u{FFFF}' {
                     has_kinzi = true;
                 } else {
@@ -506,7 +509,8 @@ mod tests {
             ("\u{1031}\u{103C}\u{1015}\u{102C}", "ပြော"),
         ];
         for (raw, expected) in cases {
-            let mut pairs: Vec<(char, usize)> = raw.chars().enumerate().map(|(i, c)| (c, i)).collect();
+            let mut pairs: Vec<(char, usize)> =
+                raw.chars().enumerate().map(|(i, c)| (c, i)).collect();
             sanitize_and_canonicalize_myanmar(&mut pairs);
             let got: String = pairs.iter().map(|x| x.0).collect();
             assert_eq!(got, expected, "failed canonicalizing {raw:?}");
@@ -515,7 +519,8 @@ mod tests {
 
     #[test]
     fn sanitizes_tui_grapheme_separators_and_spurious_dotted_circles() {
-        let broken_tui = "ဒီန\u{200B}ေ့ ပရ\u{200C}ောဂ\u{200D}ျက်နဲ့ ပ\u{2060}ြ\u{FEFF}ောပ\u{25CC}ြပ\u{034F}ေးပါ။";
+        let broken_tui =
+            "ဒီန\u{200B}ေ့ ပရ\u{200C}ောဂ\u{200D}ျက်နဲ့ ပ\u{2060}ြ\u{FEFF}ောပ\u{25CC}ြပ\u{034F}ေးပါ။";
         let mut pairs: Vec<(char, usize)> = broken_tui
             .chars()
             .enumerate()

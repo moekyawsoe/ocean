@@ -7,6 +7,7 @@ mod renderer;
 mod split;
 mod statusbar;
 mod terminal;
+mod update;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +23,7 @@ use font::{FontStyle, FontSystem};
 use renderer::{RenderEngine, save_scene_png};
 use terminal::snapshot_from_bytes;
 
-const STARTER_CONFIG: &str = include_str!("../config.example");
+use crate::config::STARTER_CONFIG;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,7 +46,7 @@ fn main() {
                 return;
             }
             "-v" | "--version" | "+version" => {
-                println!("ocean {}", env!("CARGO_PKG_VERSION"));
+                println!("ocean {}", crate::update::running_version());
                 return;
             }
             "-e" | "--command" => {
@@ -167,7 +168,11 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
                 "Built-in themes — 5 Dark + 5 Light (use `theme = <name>` in config or Right-Click -> Switch Theme):"
             );
             for info in ThemePalette::curated_themes() {
-                let marker = if info.id == config.theme_name { "*" } else { " " };
+                let marker = if info.id == config.theme_name {
+                    "*"
+                } else {
+                    " "
+                };
                 let mode = if info.is_dark { "dark " } else { "light" };
                 println!("  {marker} {:<20} ({mode}) — {}", info.id, info.label);
             }
@@ -229,6 +234,30 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
             }
             println!("Created Ghostty-style config at `{}`", path.display());
         }
+        "+edit-config" => {
+            let Some(path) = Config::default_config_path() else {
+                eprintln!("Could not determine XDG config directory.");
+                std::process::exit(1);
+            };
+            if !path.exists() {
+                if let Some(parent) = path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if let Err(err) = fs::write(&path, STARTER_CONFIG) {
+                    eprintln!("Failed writing {}: {err}", path.display());
+                    std::process::exit(1);
+                }
+            }
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+            let status = std::process::Command::new(&editor).arg(&path).status();
+            match status {
+                Ok(s) => std::process::exit(s.code().unwrap_or(0)),
+                Err(err) => {
+                    eprintln!("Failed launching {editor}: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         "+myanmar-check" => {
             let mut font_sys = FontSystem::new(config, 1.0);
             let mm_id = font_sys.resolve_font_for_char('က', FontStyle::Regular);
@@ -279,6 +308,64 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
                     out.len(),
                     has_dotted
                 );
+            }
+        }
+        "+check-update" => {
+            println!("Checking GitHub Releases for ocean updates (https://api.github.com/repos/moekyawsoe/ocean/releases/latest)...");
+            let cur = crate::update::running_version();
+            match crate::update::check_for_update_online(&cur) {
+                Ok(Some(info)) => {
+                    crate::update::save_cached_update(Some(&info));
+                    println!("\n  Update Available: {cur} -> {}", info.tag_name);
+                    println!("  Release Name    : {}", info.release_name);
+                    println!("  Published At    : {}", info.published_at);
+                    println!("  Release Page    : {}", info.html_url);
+                    if let Some(deb) = &info.deb_url {
+                        println!("  Debian (.deb)   : {deb}");
+                    }
+                    if let Some(rpm) = &info.rpm_url {
+                        println!("  Fedora (.rpm)   : {rpm}");
+                    }
+                    if let Some(tar) = &info.tar_url {
+                        println!("  Tarball (.tar)  : {tar}");
+                    }
+                    println!("\nTo install this update directly, run:\n  ocean +update");
+                }
+                Ok(None) => {
+                    crate::update::save_cached_update(None);
+                    println!("\nOcean is up to date (current version: {cur}).");
+                }
+                Err(err) => {
+                    eprintln!("\nFailed to check for updates: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "+update" => {
+            println!("Checking GitHub Releases for latest ocean package...");
+            let cur = crate::update::running_version();
+            match crate::update::check_for_update_online(&cur) {
+                Ok(Some(info)) => {
+                    println!("Found newer release: {}", info.tag_name);
+                    let (prog, args) = crate::update::generate_update_command(&info);
+                    let status = std::process::Command::new(&prog)
+                        .args(&args)
+                        .status();
+                    match status {
+                        Ok(s) => std::process::exit(s.code().unwrap_or(0)),
+                        Err(e) => {
+                            eprintln!("Failed executing updater: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    println!("Ocean is already at the latest version ({cur}). Nothing to update.");
+                }
+                Err(err) => {
+                    eprintln!("Update check failed: {err}");
+                    std::process::exit(1);
+                }
             }
         }
         other => {
@@ -332,8 +419,9 @@ fn run_screenshot(
             first: Box::new(split::SplitNode::Leaf(1)),
             second: Box::new(split::SplitNode::Leaf(2)),
         };
-        let (layouts, dividers) =
-            split::compute_split_layout(&root, config, &font_sys, win_w, win_h, 1.0, tab_h, status_h);
+        let (layouts, dividers) = split::compute_split_layout(
+            &root, config, &font_sys, win_w, win_h, 1.0, tab_h, status_h,
+        );
         let l1 = layouts[0];
         let l2 = layouts[1];
 
@@ -367,8 +455,18 @@ fn run_screenshot(
             "    ocean-light        (light) — Ocean Light\r\n"
         );
 
-        let snap1 = snapshot_from_bytes(left_ansi.as_bytes(), config, l1.cols as usize, l1.rows as usize);
-        let snap2 = snapshot_from_bytes(right_ansi.as_bytes(), config, l2.cols as usize, l2.rows as usize);
+        let snap1 = snapshot_from_bytes(
+            left_ansi.as_bytes(),
+            config,
+            l1.cols as usize,
+            l1.rows as usize,
+        );
+        let snap2 = snapshot_from_bytes(
+            right_ansi.as_bytes(),
+            config,
+            l2.cols as usize,
+            l2.rows as usize,
+        );
 
         let panes = [
             renderer::PaneScene {
@@ -392,6 +490,7 @@ fn run_screenshot(
             2,
             config.window_show_status_bar,
             &config.keybinds,
+            None,
         );
         if let Some(theme_idx) = ctx_menu
             .entries
@@ -414,6 +513,7 @@ fn run_screenshot(
             1.0,
             &tabs,
             Some(&ctx_menu),
+            None,
             None,
             None,
             true,
@@ -486,6 +586,7 @@ fn run_screenshot(
         win_h,
         1.0,
         &[],
+        None,
         None,
         None,
         None,
@@ -591,11 +692,14 @@ OPTIONS:
 
 ACTIONS (Ghostty-style):
     +init-config                   Create starter config at ~/.config/ocean/config
+    +edit-config                   Open ~/.config/ocean/config in nano to view/edit
     +show-config                   Display active resolved configuration
     +validate-config               Check config file syntax for errors/warnings
     +list-fonts                    List discovered Monospace and Myanmar/Burmese fonts
     +list-themes                   List built-in color themes
-    +myanmar-check                 Verify OpenType Myanmar shaping on system fonts",
-        env!("CARGO_PKG_VERSION")
+    +myanmar-check                 Verify OpenType Myanmar shaping on system fonts
+    +check-update                  Check online if a newer release of Ocean is available
+    +update                        Download and upgrade Ocean to latest tagged release",
+        crate::update::running_version()
     );
 }

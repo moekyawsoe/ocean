@@ -90,6 +90,7 @@ pub struct ContextMenu {
     pub submenu_open: bool,
     pub sub_entries: Vec<ThemeSubEntry>,
     pub sub_hovered: Option<usize>,
+    pub committed_theme: Option<String>,
 }
 
 impl ContextMenu {
@@ -100,6 +101,7 @@ impl ContextMenu {
         num_panes_in_tab: usize,
         status_bar_visible: bool,
         keybinds: &[Keybind],
+        available_update: Option<&crate::update::UpdateInfo>,
     ) -> Self {
         let sc = |act: Action, fallback: &str| -> String {
             shortcut_for_action(keybinds, &act).unwrap_or_else(|| fallback.to_string())
@@ -169,6 +171,12 @@ impl ContextMenu {
                 action: Action::ShowHelp,
                 enabled: true,
             }),
+            MenuEntry::Item(MenuItem {
+                label: "Edit Config (nano)",
+                shortcut: "e in help".to_string(),
+                action: Action::EditConfig,
+                enabled: true,
+            }),
             MenuEntry::Separator,
         ]);
 
@@ -194,6 +202,18 @@ impl ContextMenu {
             }));
         }
 
+        if let Some(up) = available_update {
+            let label =
+                Box::leak(format!("Update to {} (Click to Install)", up.tag_name).into_boxed_str());
+            entries.push(MenuEntry::Separator);
+            entries.push(MenuEntry::Item(MenuItem {
+                label,
+                shortcut: "u".to_string(),
+                action: Action::TriggerUpdate,
+                enabled: true,
+            }));
+        }
+
         let curated = ThemePalette::curated_themes();
         let mut sub_entries = Vec::with_capacity(13);
         sub_entries.push(ThemeSubEntry::Header("Dark Themes (5)"));
@@ -214,7 +234,19 @@ impl ContextMenu {
             submenu_open: false,
             sub_entries,
             sub_hovered: None,
+            committed_theme: None,
         }
+    }
+
+    pub fn hovered_theme_id(&self) -> Option<&'static str> {
+        if self.submenu_open
+            && let Some(sub_idx) = self.sub_hovered
+        {
+            if let Some(ThemeSubEntry::Theme(info)) = self.sub_entries.get(sub_idx) {
+                return Some(info.id);
+            }
+        }
+        None
     }
 
     pub fn select_first_enabled(&mut self) {
@@ -226,6 +258,7 @@ impl ContextMenu {
     }
 
     pub fn open_theme_submenu(&mut self, active_theme: &str) {
+        self.committed_theme = Some(active_theme.to_string());
         if let Some(idx) = self.theme_submenu_entry_index() {
             self.hovered = Some(idx);
             self.open_submenu_with_keyboard(active_theme);
@@ -631,9 +664,7 @@ impl ContextMenu {
                     }
                     MenuKeyOutcome::Redraw
                 }
-                Key::Character(s)
-                    if s.len() == 1 && s.as_bytes()[0].is_ascii_digit() =>
-                {
+                Key::Character(s) if s.len() == 1 && s.as_bytes()[0].is_ascii_digit() => {
                     let d = s.as_bytes()[0];
                     let pos = if d == b'0' {
                         9usize
@@ -641,16 +672,12 @@ impl ContextMenu {
                         (d - b'1') as usize
                     };
                     let theme_indices = self.theme_sub_indices();
-                    if let Some(&sub_idx) = theme_indices.get(pos)
-                        && let Some(ThemeSubEntry::Theme(info)) = self.sub_entries.get(sub_idx)
-                    {
-                        return MenuKeyOutcome::Execute(Action::SetTheme(info.id.to_string()));
+                    if let Some(&sub_idx) = theme_indices.get(pos) {
+                        self.sub_hovered = Some(sub_idx);
                     }
                     MenuKeyOutcome::Redraw
                 }
-                Key::Named(NamedKey::Enter | NamedKey::Space) => {
-                    self.activate_hovered_sub_theme()
-                }
+                Key::Named(NamedKey::Enter | NamedKey::Space) => self.activate_hovered_sub_theme(),
                 Key::Character(s) if s == "l" => self.activate_hovered_sub_theme(),
                 _ => MenuKeyOutcome::NotHandled,
             };
@@ -775,6 +802,8 @@ impl ContextMenu {
             "n" | "N" => Some(Action::NewTab),
             "b" | "B" => Some(Action::ToggleStatusBar),
             "?" | "/" => Some(Action::ShowHelp),
+            "o" | "O" => Some(Action::EditConfig),
+            "u" | "U" => Some(Action::TriggerUpdate),
             "w" | "W" | "x" | "X" => Some(Action::CloseSurface),
             _ => None,
         };
@@ -794,6 +823,7 @@ impl ContextMenu {
     }
 
     fn open_submenu_with_keyboard(&mut self, active_theme: &str) {
+        self.committed_theme = Some(active_theme.to_string());
         self.submenu_open = true;
         let active_idx = self
             .sub_entries
@@ -877,7 +907,7 @@ mod tests {
     #[test]
     fn context_menu_has_10_themes_5_dark_5_light_and_vim_keyboard_nav() {
         let binds = default_keybinds();
-        let mut menu = ContextMenu::build(790.0, 590.0, false, 2, true, &binds);
+        let mut menu = ContextMenu::build(790.0, 590.0, false, 2, true, &binds, None);
         menu.select_first_enabled();
         assert!(menu.hovered.is_some());
 
@@ -929,6 +959,87 @@ mod tests {
         assert_eq!(
             menu.handle_key(&Key::Character("b".into()), mods, "ocean-dark"),
             MenuKeyOutcome::Execute(Action::ToggleStatusBar)
+        );
+    }
+
+    #[test]
+    fn theme_submenu_hover_preview_and_commit_behavior() {
+        let binds = default_keybinds();
+        let mut menu = ContextMenu::build(100.0, 100.0, false, 1, true, &binds, None);
+        menu.open_theme_submenu("ocean-dark");
+
+        assert_eq!(menu.committed_theme.as_deref(), Some("ocean-dark"));
+        assert_eq!(menu.hovered_theme_id(), Some("ocean-dark"));
+
+        let mods = ModifiersState::default();
+        // Moving down (j) hovers tokyo-night for live preview without committing yet
+        let outcome = menu.handle_key(&Key::Character("j".into()), mods, "ocean-dark");
+        assert_eq!(outcome, MenuKeyOutcome::Redraw);
+        assert_eq!(menu.hovered_theme_id(), Some("tokyo-night"));
+
+        // Digit shortcut '6' (first light theme) previews ocean-light
+        let outcome = menu.handle_key(&Key::Character("6".into()), mods, "ocean-dark");
+        assert_eq!(outcome, MenuKeyOutcome::Redraw);
+        assert_eq!(menu.hovered_theme_id(), Some("ocean-light"));
+
+        // Escape cancels submenu, clearing hovered theme ID so parent reverts preview
+        let outcome = menu.handle_key(&Key::Named(NamedKey::Escape), mods, "ocean-dark");
+        assert_eq!(outcome, MenuKeyOutcome::Redraw);
+        assert!(!menu.submenu_open);
+        assert_eq!(menu.hovered_theme_id(), None);
+
+        // Re-open themes submenu and hit Enter on hovered theme -> commits theme
+        menu.open_theme_submenu("ocean-dark");
+        assert_eq!(menu.hovered_theme_id(), Some("ocean-dark"));
+        let outcome = menu.handle_key(&Key::Named(NamedKey::Enter), mods, "ocean-dark");
+        assert_eq!(
+            outcome,
+            MenuKeyOutcome::Execute(Action::SetTheme("ocean-dark".to_string()))
+        );
+
+        // Test mouse click directly on submenu row
+        let geom = menu.compute_geometry(9.0, 20.0, 800, 600, 1.0, 26.0);
+        let sub = geom.submenu.as_ref().expect("submenu geometry present");
+        let first_theme_row = sub
+            .rows
+            .iter()
+            .find(|r| {
+                !r.is_separator
+                    && matches!(menu.sub_entries[r.entry_index], ThemeSubEntry::Theme(_))
+            })
+            .expect("theme row present");
+        let click_y = first_theme_row.y + 2.0;
+        let click_x = sub.x + 10.0;
+        let click_outcome = menu.handle_click(&geom, click_x, click_y);
+        assert!(matches!(
+            click_outcome,
+            MenuClickOutcome::Execute(Action::SetTheme(_))
+        ));
+    }
+
+    #[test]
+    fn context_menu_includes_update_action_when_available() {
+        let binds = default_keybinds();
+        let update = crate::update::UpdateInfo {
+            version: "1.0.0".to_string(),
+            tag_name: "v1.0.0".to_string(),
+            release_name: "Ocean v1.0.0".to_string(),
+            html_url: "https://github.com/moekyawsoe/ocean/releases/tag/v1.0.0".to_string(),
+            published_at: "2026-11-04".to_string(),
+            deb_url: None,
+            rpm_url: None,
+            tar_url: None,
+            sha256_url: None,
+            body: "".to_string(),
+        };
+
+        let menu = ContextMenu::build(100.0, 100.0, false, 1, true, &binds, Some(&update));
+        let update_entry = menu.entries.iter().find(|e| {
+            matches!(e, MenuEntry::Item(it) if it.action == Action::TriggerUpdate && it.label.contains("v1.0.0"))
+        });
+        assert!(
+            update_entry.is_some(),
+            "Update entry should be present in menu"
         );
     }
 }

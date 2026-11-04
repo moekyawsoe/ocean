@@ -34,9 +34,12 @@ case "$HOST_ARCH" in
     ;;
 esac
 
+# Ensure Cargo.toml version is in sync with the package version
+sed -i "0,/^version = \".*\"/s//version = \"$CLEAN_VERSION\"/" "$ROOT_DIR/Cargo.toml"
+
 BIN_PATH="$ROOT_DIR/target/release/ocean"
-if [[ ! -x "$BIN_PATH" ]]; then
-  echo "==> Building release binary..."
+if [[ ! -x "$BIN_PATH" ]] || [[ "$("$BIN_PATH" --version 2>/dev/null | awk '{print $2}')" != "$CLEAN_VERSION" ]]; then
+  echo "==> Building release binary for version $CLEAN_VERSION..."
   cargo build --release
 fi
 

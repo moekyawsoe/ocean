@@ -91,12 +91,7 @@ impl GlyphAtlas {
         let font_ref = loaded.swash_ref();
         let px = size_q4 as f32 / 16.0;
 
-        let mut scaler = self
-            .scale_ctx
-            .builder(font_ref)
-            .size(px)
-            .hint(true)
-            .build();
+        let mut scaler = self.scale_ctx.builder(font_ref).size(px).hint(true).build();
 
         let image = Render::new(&[
             Source::ColorOutline(0),

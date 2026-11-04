@@ -157,7 +157,12 @@ impl FontSystem {
         sys
     }
 
-    pub fn update_size_or_config(&mut self, config: &Config, scale_factor: f64, rebuild_fonts: bool) {
+    pub fn update_size_or_config(
+        &mut self,
+        config: &Config,
+        scale_factor: f64,
+        rebuild_fonts: bool,
+    ) {
         self.features = parse_opentype_features(&config.font_features);
         if rebuild_fonts {
             self.primary_chains = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
@@ -389,8 +394,23 @@ impl FontSystem {
         let font_px = (config.font_size * (96.0 / 72.0) * scale_factor as f32).max(6.0);
         let myanmar_font_px = (font_px * config.myanmar_font_scale).max(6.0);
 
-        let (mut cell_w, mut ascender, mut descender, mut line_gap, mut ul_offset, mut ul_thick, mut strike_off) =
-            (font_px * 0.6, font_px * 0.82, font_px * 0.22, 0.0_f32, font_px * 0.12, (font_px / 14.0).max(1.0), font_px * 0.3);
+        let (
+            mut cell_w,
+            mut ascender,
+            mut descender,
+            mut line_gap,
+            mut ul_offset,
+            mut ul_thick,
+            mut strike_off,
+        ) = (
+            font_px * 0.6,
+            font_px * 0.82,
+            font_px * 0.22,
+            0.0_f32,
+            font_px * 0.12,
+            (font_px / 14.0).max(1.0),
+            font_px * 0.3,
+        );
 
         if let Some(&primary_id) = self.primary_chains[0].first() {
             let f = &self.fonts[primary_id];

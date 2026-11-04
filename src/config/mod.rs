@@ -55,6 +55,8 @@ pub enum TabBarMode {
     Never,
 }
 
+pub const STARTER_CONFIG: &str = include_str!("../../config.example");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZawgyiMode {
     Off,
@@ -115,6 +117,7 @@ pub struct Config {
     pub copy_on_select: bool,
     pub clipboard_trim_trailing_spaces: bool,
     pub link_url: bool,
+    pub auto_update_check: crate::update::UpdateCheckMode,
 
     // Keybinds
     pub keybinds: Vec<Keybind>,
@@ -175,6 +178,7 @@ impl Default for Config {
             copy_on_select: false,
             clipboard_trim_trailing_spaces: true,
             link_url: true,
+            auto_update_check: crate::update::UpdateCheckMode::Daily,
 
             keybinds: default_keybinds(),
             loaded_path: None,
@@ -245,6 +249,88 @@ impl Config {
             return false;
         };
         self.last_modified != Some(mtime)
+    }
+
+    /// Ensure the configuration file exists on disk (creates ~/.config/ocean/config from template if absent).
+    pub fn ensure_config_file(&mut self) -> Result<PathBuf, String> {
+        let target_path = self
+            .loaded_path
+            .clone()
+            .or_else(Self::default_config_path)
+            .ok_or_else(|| "Could not determine config path".to_string())?;
+
+        if !target_path.exists() {
+            if let Some(parent) = target_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            fs::write(&target_path, STARTER_CONFIG).map_err(|e| {
+                format!(
+                    "Failed to create config file at {}: {e}",
+                    target_path.display()
+                )
+            })?;
+            self.loaded_path = Some(target_path.clone());
+            self.last_modified = fs::metadata(&target_path).and_then(|m| m.modified()).ok();
+        }
+
+        Ok(target_path)
+    }
+
+    /// Update or append `theme = <theme_name>` in the active configuration file and persist it to disk.
+    /// Preserves all existing comments, options, and formatting.
+    pub fn save_theme(&mut self, theme_name: &str) -> Result<PathBuf, String> {
+        let target_path = self
+            .loaded_path
+            .clone()
+            .or_else(Self::default_config_path)
+            .ok_or_else(|| "Could not determine config path".to_string())?;
+
+        let mut lines = Vec::new();
+        let mut theme_updated = false;
+
+        if target_path.exists() {
+            let content = fs::read_to_string(&target_path)
+                .map_err(|e| format!("Failed to read {}: {e}", target_path.display()))?;
+
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if !trimmed.starts_with('#') {
+                    if let Some((k, _)) = trimmed.split_once('=') {
+                        if k.trim() == "theme" {
+                            lines.push(format!("theme = {theme_name}"));
+                            theme_updated = true;
+                            continue;
+                        }
+                    }
+                }
+                lines.push(line.to_string());
+            }
+        }
+
+        if !theme_updated {
+            lines.push(format!("theme = {theme_name}"));
+        }
+
+        if let Some(parent) = target_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        let mut new_content = lines.join("\n");
+        if !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+
+        fs::write(&target_path, new_content)
+            .map_err(|e| format!("Failed to write {}: {e}", target_path.display()))?;
+
+        self.theme_name = theme_name.to_string();
+        if let Some(pal) = ThemePalette::from_name(theme_name) {
+            self.colors = pal;
+        }
+        self.loaded_path = Some(target_path.clone());
+        self.last_modified = fs::metadata(&target_path).and_then(|m| m.modified()).ok();
+
+        Ok(target_path)
     }
 
     fn apply_color_overrides(&mut self, ov: ColorOverrides) {
@@ -415,19 +501,20 @@ impl Config {
                     self.warn(line_no, key, val);
                 }
             }
-            "myanmar-zawgyi" | "myanmar-zawgyi-convert" => match val.to_ascii_lowercase().as_str()
-            {
-                "false" | "off" | "none" | "unicode" | "0" => {
-                    self.myanmar_zawgyi = ZawgyiMode::Off;
+            "myanmar-zawgyi" | "myanmar-zawgyi-convert" => {
+                match val.to_ascii_lowercase().as_str() {
+                    "false" | "off" | "none" | "unicode" | "0" => {
+                        self.myanmar_zawgyi = ZawgyiMode::Off;
+                    }
+                    "auto" | "detect" => {
+                        self.myanmar_zawgyi = ZawgyiMode::Auto;
+                    }
+                    "true" | "on" | "force" | "1" => {
+                        self.myanmar_zawgyi = ZawgyiMode::Force;
+                    }
+                    _ => self.warn(line_no, key, val),
                 }
-                "auto" | "detect" => {
-                    self.myanmar_zawgyi = ZawgyiMode::Auto;
-                }
-                "true" | "on" | "force" | "1" => {
-                    self.myanmar_zawgyi = ZawgyiMode::Force;
-                }
-                _ => self.warn(line_no, key, val),
-            },
+            }
             "adjust-cell-width" => match MetricAdjust::parse(val) {
                 Some(m) => self.adjust_cell_width = m,
                 None => self.warn(line_no, key, val),
@@ -596,6 +683,12 @@ impl Config {
                 }
                 _ => self.warn(line_no, key, val),
             },
+            "auto-update-check" | "update-check" | "check-update" => {
+                match crate::update::UpdateCheckMode::parse(val) {
+                    Some(m) => self.auto_update_check = m,
+                    None => self.warn(line_no, key, val),
+                }
+            }
             "command" => {
                 self.command = non_empty(val);
             }
@@ -603,8 +696,7 @@ impl Config {
                 if val.eq_ignore_ascii_case("inherit") || val.is_empty() {
                     self.working_directory = None;
                 } else {
-                    self.working_directory =
-                        Some(expand_tilde(val).to_string_lossy().into_owned());
+                    self.working_directory = Some(expand_tilde(val).to_string_lossy().into_owned());
                 }
             }
             "term" => {
@@ -698,7 +790,10 @@ impl Config {
         }
         out.push_str(&format!("font-size = {}\n", self.font_size));
         out.push_str(&format!("font-thicken = {}\n", self.font_thicken));
-        out.push_str(&format!("myanmar-font-scale = {}\n", self.myanmar_font_scale));
+        out.push_str(&format!(
+            "myanmar-font-scale = {}\n",
+            self.myanmar_font_scale
+        ));
         out.push_str(&format!(
             "myanmar-zawgyi = {}\n",
             match self.myanmar_zawgyi {
@@ -708,9 +803,18 @@ impl Config {
             }
         ));
         out.push_str(&format!("theme = {}\n", self.theme_name));
-        out.push_str(&format!("background = {}\n", self.colors.background.to_hex()));
-        out.push_str(&format!("foreground = {}\n", self.colors.foreground.to_hex()));
-        out.push_str(&format!("background-opacity = {}\n", self.background_opacity));
+        out.push_str(&format!(
+            "background = {}\n",
+            self.colors.background.to_hex()
+        ));
+        out.push_str(&format!(
+            "foreground = {}\n",
+            self.colors.foreground.to_hex()
+        ));
+        out.push_str(&format!(
+            "background-opacity = {}\n",
+            self.background_opacity
+        ));
         out.push_str(&format!(
             "cursor-color = {}\n",
             self.colors.cursor_color.to_hex()
@@ -740,6 +844,10 @@ impl Config {
         out.push_str(&format!(
             "window-show-status-bar = {}\n",
             self.window_show_status_bar
+        ));
+        out.push_str(&format!(
+            "auto-update-check = {}\n",
+            self.auto_update_check.as_str()
         ));
         out.push_str(&format!("scrollback-limit = {}\n", self.scrollback_limit));
         out.push_str(&format!("term = {}\n", self.term));
@@ -893,9 +1001,74 @@ mod tests {
         assert!(kb_cfg.warnings.is_empty(), "{:?}", kb_cfg.warnings);
         assert!(!kb_cfg.window_show_status_bar);
         assert_eq!(
-            keybind::shortcut_for_action(&Config::default().keybinds, &keybind::Action::ToggleContextMenu)
-                .as_deref(),
+            keybind::shortcut_for_action(
+                &Config::default().keybinds,
+                &keybind::Action::ToggleContextMenu
+            )
+            .as_deref(),
             Some("Ctrl+Shift+P")
         );
+    }
+
+    #[test]
+    fn verifies_save_theme_persists_and_updates_in_place() {
+        let temp_dir = std::env::temp_dir().join(format!("ocean_test_cfg_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let cfg_path = temp_dir.join("config");
+
+        let initial_content =
+            "background-opacity = 0.96\ncursor-style = block\nwindow-titlebar = false\n";
+        fs::write(&cfg_path, initial_content).unwrap();
+
+        let mut cfg = Config::load(Some(&cfg_path));
+        assert_eq!(cfg.theme_name, "ocean-dark");
+
+        // Save new theme: should append `theme = tokyo-night`
+        cfg.save_theme("tokyo-night").unwrap();
+
+        let reloaded = Config::load(Some(&cfg_path));
+        assert_eq!(reloaded.theme_name, "tokyo-night");
+        let content_after = fs::read_to_string(&cfg_path).unwrap();
+        assert!(content_after.contains("background-opacity = 0.96"));
+        assert!(content_after.contains("theme = tokyo-night"));
+
+        // Update theme in-place: should replace `theme = tokyo-night` with `theme = nord`
+        cfg.save_theme("nord").unwrap();
+        let reloaded2 = Config::load(Some(&cfg_path));
+        assert_eq!(reloaded2.theme_name, "nord");
+        let content_after2 = fs::read_to_string(&cfg_path).unwrap();
+        assert_eq!(content_after2.matches("theme =").count(), 1);
+        assert!(content_after2.contains("theme = nord"));
+        assert!(!content_after2.contains("theme = tokyo-night"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn verifies_ensure_config_file_creates_and_preserves() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ocean_test_ensure_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let cfg_path = temp_dir.join("ocean/config");
+
+        let mut cfg = Config::default();
+        cfg.loaded_path = Some(cfg_path.clone());
+
+        // First call: creates file from template
+        assert!(!cfg_path.exists());
+        let res_path = cfg.ensure_config_file().unwrap();
+        assert_eq!(res_path, cfg_path);
+        assert!(cfg_path.exists());
+        let text = fs::read_to_string(&cfg_path).unwrap();
+        assert!(text.contains("Ocean Terminal Configuration"));
+
+        // Modifying the file and calling ensure_config_file again preserves existing content
+        fs::write(&cfg_path, "theme = nord\n").unwrap();
+        let res_path2 = cfg.ensure_config_file().unwrap();
+        assert_eq!(res_path2, cfg_path);
+        let text2 = fs::read_to_string(&cfg_path).unwrap();
+        assert_eq!(text2, "theme = nord\n");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

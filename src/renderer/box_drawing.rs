@@ -33,9 +33,7 @@ pub fn emit_box_char(
 
     // Helper for 4-arm box characters: (left, right, up, down) weights: 0=none, 1=light, 2=heavy
     let arms: Option<(u8, u8, u8, u8)> = match c {
-        '─' | '╌' | '┄' | '┈' | '╭' | '╮' | '╯' | '╰'
-            if matches!(c, '─' | '╌' | '┄' | '┈') =>
-        {
+        '─' | '╌' | '┄' | '┈' | '╭' | '╮' | '╯' | '╰' if matches!(c, '─' | '╌' | '┄' | '┈') => {
             Some((1, 1, 0, 0))
         }
         '━' | '╍' | '┅' | '┉' => Some((2, 2, 0, 0)),

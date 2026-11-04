@@ -1,6 +1,6 @@
 use std::ffi::CString;
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -131,7 +131,9 @@ pub struct OceanApp {
 
     // Interaction & UI state
     context_menu: Option<ContextMenu>,
+    theme_before_preview: Option<String>,
     help_dialog: Option<HelpDialog>,
+    available_update: Option<crate::update::UpdateInfo>,
     status_hover: StatusBarHover,
     dragging_divider: Option<DividerDragState>,
     selecting_pane_id: Option<u64>,
@@ -158,9 +160,18 @@ pub struct OceanApp {
 }
 
 impl OceanApp {
-    pub fn new(config: Config, launch_opts: LaunchOptions, proxy: EventLoopProxy<AppEvent>) -> Self {
+    pub fn new(
+        config: Config,
+        launch_opts: LaunchOptions,
+        proxy: EventLoopProxy<AppEvent>,
+    ) -> Self {
         let base_font_size = config.font_size;
         let past = Instant::now() - Duration::from_secs(5);
+        crate::update::start_background_update_check(
+            config.auto_update_check,
+            crate::update::running_version(),
+            proxy.clone(),
+        );
         Self {
             config,
             base_font_size,
@@ -176,7 +187,9 @@ impl OceanApp {
             snapshot_bufs: Vec::new(),
             clipboard: Clipboard::new().ok(),
             context_menu: None,
+            theme_before_preview: None,
             help_dialog: None,
+            available_update: None,
             status_hover: StatusBarHover::default(),
             dragging_divider: None,
             selecting_pane_id: None,
@@ -385,6 +398,93 @@ impl OceanApp {
         Ok(())
     }
 
+    fn spawn_tab_with_command(
+        &mut self,
+        prog: String,
+        args: Vec<String>,
+        title: Option<String>,
+    ) -> Result<(), String> {
+        let (Some(gl_state), Some(font_sys)) = (&self.gl_state, &self.font_sys) else {
+            return Ok(());
+        };
+
+        let phys = gl_state.window.inner_size();
+        let sf = gl_state.window.scale_factor();
+        let prospective_tabs = self.tabs.len() + 1;
+        let (_, _, cols, rows) = RenderEngine::compute_grid_geometry(
+            &self.config,
+            font_sys,
+            phys.width.max(64),
+            phys.height.max(64),
+            sf,
+            prospective_tabs,
+        );
+
+        let id = self.next_pane_id;
+        self.next_pane_id += 1;
+
+        let cwd = self.inherited_cwd(false);
+        let mut session = TerminalSession::spawn(
+            id,
+            &self.config,
+            Some((prog.clone(), args)),
+            cwd,
+            cols,
+            rows,
+            font_sys.metrics.cell_width as u16,
+            font_sys.metrics.cell_height as u16,
+            self.proxy.clone(),
+            Arc::clone(&self.wakeup_queued),
+        )?;
+        session.title = title.unwrap_or_else(|| prog.clone());
+
+        self.tabs.push(Tab::new(session));
+        self.active_tab = self.tabs.len() - 1;
+        self.resize_all_tabs();
+        self.sync_window_title();
+        self.request_redraw();
+        Ok(())
+    }
+
+    pub fn open_config_in_editor(&mut self) {
+        let config_path = match self.config.ensure_config_file() {
+            Ok(p) => p,
+            Err(err) => {
+                eprintln!("ocean: failed resolving config file: {err}");
+                return;
+            }
+        };
+
+        let path_str = config_path.display().to_string();
+        let editor = editor_program();
+        let title = format!("{editor} — config");
+
+        if let Err(err) = self.spawn_tab_with_command(editor, vec![path_str], Some(title)) {
+            eprintln!("ocean: failed to launch config editor: {err}");
+        }
+    }
+
+    pub fn trigger_app_update(&mut self) {
+        self.close_context_menu();
+        self.help_dialog = None;
+
+        if let Some(info) = &self.available_update {
+            let (prog, args) = crate::update::generate_update_command(info);
+            let title = format!("Ocean Update {}", info.tag_name);
+            if let Err(err) = self.spawn_tab_with_command(prog, args, Some(title)) {
+                eprintln!("ocean: failed to launch update tab: {err}");
+            }
+        } else {
+            if let Err(err) = self.spawn_tab_with_command(
+                "ocean".to_string(),
+                vec!["+update".to_string()],
+                Some("Ocean Updater".to_string()),
+            ) {
+                eprintln!("ocean: failed to launch update tab: {err}");
+            }
+        }
+    }
+
     fn split_active_pane(&mut self, direction: SplitDirection) -> Result<(), String> {
         let (Some(gl_state), Some(font_sys)) = (&self.gl_state, &self.font_sys) else {
             return Ok(());
@@ -546,7 +646,7 @@ impl OceanApp {
             return;
         };
 
-        self.context_menu = None;
+        self.close_context_menu();
         self.dragging_divider = None;
         if self.selecting_pane_id == Some(pane_id) {
             self.selecting_pane_id = None;
@@ -593,7 +693,7 @@ impl OceanApp {
         if tab_idx >= self.tabs.len() {
             return;
         }
-        self.context_menu = None;
+        self.close_context_menu();
         self.dragging_divider = None;
         self.selecting_pane_id = None;
         self.mouse_left_down = false;
@@ -707,6 +807,7 @@ impl OceanApp {
             tui_mode,
             context_menu: self.context_menu.as_ref(),
             help_dialog: self.help_dialog.as_ref(),
+            available_update: self.available_update.as_ref(),
         };
         StatusBarGeometry::compute(
             &self.config,
@@ -747,12 +848,17 @@ impl OceanApp {
     }
 
     fn open_context_menu(&mut self, px: f32, py: f32, via_keyboard: bool, open_themes: bool) {
-        let has_selection = self.active_session().is_some_and(TerminalSession::has_selection);
+        let has_selection = self
+            .active_session()
+            .is_some_and(TerminalSession::has_selection);
         let num_panes = self
             .tabs
             .get(self.active_tab)
             .map(|t| t.panes.len())
             .unwrap_or(1);
+        if self.theme_before_preview.is_none() {
+            self.theme_before_preview = Some(self.config.theme_name.clone());
+        }
         let mut menu = ContextMenu::build(
             px,
             py,
@@ -760,6 +866,7 @@ impl OceanApp {
             num_panes,
             self.config.window_show_status_bar,
             &self.config.keybinds,
+            self.available_update.as_ref(),
         );
         if open_themes {
             menu.open_theme_submenu(&self.config.theme_name);
@@ -781,6 +888,7 @@ impl OceanApp {
         }
         self.help_dialog = None;
         self.context_menu = Some(menu);
+        self.sync_theme_preview();
         self.status_hover.clear();
         self.mouse_left_down = false;
         self.selecting_pane_id = None;
@@ -792,6 +900,42 @@ impl OceanApp {
     fn open_context_menu_at_cursor(&mut self, open_themes: bool) {
         let (px, py) = self.active_cursor_menu_anchor().unwrap_or((48.0, 48.0));
         self.open_context_menu(px, py, true, open_themes);
+    }
+
+    fn sync_theme_preview(&mut self) {
+        let target_theme = if let Some(menu) = &self.context_menu {
+            menu.hovered_theme_id().map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        if let Some(theme_id) = target_theme {
+            if self.config.theme_name != theme_id {
+                self.apply_theme_preview(&theme_id);
+            }
+        } else if let Some(orig) = &self.theme_before_preview {
+            if &self.config.theme_name != orig {
+                let orig_clone = orig.clone();
+                self.apply_theme_preview(&orig_clone);
+            }
+        }
+    }
+
+    fn apply_theme_preview(&mut self, name: &str) {
+        if let Some(pal) = ThemePalette::from_name(name) {
+            self.config.theme_name = pal.name.clone();
+            self.config.colors = pal;
+            self.request_redraw();
+        }
+    }
+
+    fn close_context_menu(&mut self) {
+        self.context_menu = None;
+        if let Some(orig) = self.theme_before_preview.take() {
+            if self.config.theme_name != orig {
+                self.apply_theme(&orig);
+            }
+        }
     }
 
     fn apply_theme(&mut self, name: &str) {
@@ -976,9 +1120,9 @@ impl OceanApp {
                         let phys = gs.window.inner_size();
                         let sf = gs.window.scale_factor() as f32;
                         let dim = match dir {
-                            SplitDirection::Left
-                            | SplitDirection::Right
-                            | SplitDirection::Auto => phys.width as f32,
+                            SplitDirection::Left | SplitDirection::Right | SplitDirection::Auto => {
+                                phys.width as f32
+                            }
                             SplitDirection::Up | SplitDirection::Down => phys.height as f32,
                         };
                         (dim / sf.max(0.5)).max(200.0)
@@ -1013,7 +1157,7 @@ impl OceanApp {
             Action::NextTab => {
                 if self.tabs.len() > 1 {
                     self.active_tab = (self.active_tab + 1) % self.tabs.len();
-                    self.context_menu = None;
+                    self.close_context_menu();
                     self.sync_window_title();
                     self.request_redraw();
                 }
@@ -1021,7 +1165,7 @@ impl OceanApp {
             Action::PreviousTab => {
                 if self.tabs.len() > 1 {
                     self.active_tab = (self.active_tab + self.tabs.len() - 1) % self.tabs.len();
-                    self.context_menu = None;
+                    self.close_context_menu();
                     self.sync_window_title();
                     self.request_redraw();
                 }
@@ -1029,7 +1173,7 @@ impl OceanApp {
             Action::GotoTab(idx) => {
                 if idx < self.tabs.len() {
                     self.active_tab = idx;
-                    self.context_menu = None;
+                    self.close_context_menu();
                     self.sync_window_title();
                     self.request_redraw();
                 }
@@ -1071,7 +1215,7 @@ impl OceanApp {
             }
             Action::ToggleContextMenu => {
                 if self.context_menu.is_some() {
-                    self.context_menu = None;
+                    self.close_context_menu();
                     self.request_redraw();
                 } else {
                     self.open_context_menu_at_cursor(false);
@@ -1086,7 +1230,11 @@ impl OceanApp {
                 self.request_redraw();
             }
             Action::SetTheme(name) => {
+                self.theme_before_preview = None;
                 self.apply_theme(&name);
+                if let Err(err) = self.config.save_theme(&name) {
+                    eprintln!("ocean: failed saving theme to config: {err}");
+                }
             }
             Action::NextTheme => {
                 let names = ThemePalette::builtin_names();
@@ -1096,7 +1244,11 @@ impl OceanApp {
                     .map(|i| (i + 1) % names.len())
                     .unwrap_or(0);
                 if let Some(&next_name) = names.get(next_idx) {
+                    self.theme_before_preview = None;
                     self.apply_theme(next_name);
+                    if let Err(err) = self.config.save_theme(next_name) {
+                        eprintln!("ocean: failed saving theme to config: {err}");
+                    }
                 }
             }
             Action::ShowHelp => {
@@ -1105,12 +1257,17 @@ impl OceanApp {
                 } else {
                     self.help_dialog = Some(HelpDialog::new());
                 }
-                self.context_menu = None;
+                self.close_context_menu();
                 self.dragging_divider = None;
                 self.mouse_left_down = false;
                 self.selecting_pane_id = None;
                 self.set_cursor_icon(CursorIcon::Default);
                 self.request_redraw();
+            }
+            Action::EditConfig => {
+                self.close_context_menu();
+                self.help_dialog = None;
+                self.open_config_in_editor();
             }
             Action::Quit => {
                 event_loop.exit();
@@ -1119,6 +1276,9 @@ impl OceanApp {
                 if let Some(s) = self.active_session() {
                     s.write_bytes(bytes);
                 }
+            }
+            Action::TriggerUpdate => {
+                self.trigger_app_update();
             }
             Action::Ignore | Action::Unbind => {}
         }
@@ -1168,13 +1328,14 @@ impl OceanApp {
                 pane.snapshot(&self.config, &mut self.snapshot_bufs[i]);
                 if layout.pane_id == active_pane_id {
                     let snap = &self.snapshot_bufs[i];
-                    let cx = (layout.origin_x + snap.cursor_col as f32 * font_sys.metrics.cell_width)
+                    let cx = (layout.origin_x
+                        + snap.cursor_col as f32 * font_sys.metrics.cell_width)
                         .round()
                         .max(0.0) as u32;
-                    let cy =
-                        (layout.origin_y + snap.cursor_row as f32 * font_sys.metrics.cell_height)
-                            .round()
-                            .max(0.0) as u32;
+                    let cy = (layout.origin_y
+                        + snap.cursor_row as f32 * font_sys.metrics.cell_height)
+                        .round()
+                        .max(0.0) as u32;
                     active_ime_px = Some((cx, cy));
                 }
             }
@@ -1239,6 +1400,7 @@ impl OceanApp {
             &tab_titles,
             self.context_menu.as_ref(),
             self.help_dialog.as_ref(),
+            self.available_update.as_ref(),
             self.status_hover.hovered_id,
             blink_visible,
             self.focused,
@@ -1346,6 +1508,13 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             }
             AppEvent::ChildExited(pane_id) => {
                 self.close_pane_by_id(pane_id, event_loop);
+                if self.config.check_modified() {
+                    self.reload_configuration();
+                }
+            }
+            AppEvent::UpdateAvailable(info) => {
+                self.available_update = Some(info);
+                self.request_redraw();
             }
         }
     }
@@ -1368,7 +1537,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             }
             WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
-                    self.context_menu = None;
+                    self.close_context_menu();
                     if let Some(gl_state) = &self.gl_state {
                         gl_state.gl_surface.resize(
                             &gl_state.gl_context,
@@ -1381,7 +1550,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.context_menu = None;
+                self.close_context_menu();
                 if let Some(font_sys) = &mut self.font_sys {
                     font_sys.update_size_or_config(&self.config, scale_factor, false);
                 }
@@ -1392,7 +1561,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
                 if !focused {
-                    self.context_menu = None;
+                    self.close_context_menu();
                     self.dragging_divider = None;
                     self.mouse_left_down = false;
                 }
@@ -1422,7 +1591,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 }
                 Ime::Commit(text) => {
                     self.ime_preedit = None;
-                    self.context_menu = None;
+                    self.close_context_menu();
                     if self.help_dialog.is_some() {
                         return;
                     }
@@ -1505,19 +1674,26 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             self.request_redraw();
                         }
                         HelpKeyOutcome::Consumed => {}
+                        HelpKeyOutcome::EditConfig => {
+                            self.help_dialog = None;
+                            self.open_config_in_editor();
+                            self.request_redraw();
+                        }
                     }
                     return;
                 }
 
                 // 1. Keyboard navigation & dismissal when context menu is open
                 if let Some(menu) = &mut self.context_menu {
-                    match menu.handle_key(
+                    let outcome = menu.handle_key(
                         &event.logical_key,
                         self.modifiers,
                         &self.config.theme_name,
-                    ) {
+                    );
+                    self.sync_theme_preview();
+                    match outcome {
                         MenuKeyOutcome::Close => {
-                            self.context_menu = None;
+                            self.close_context_menu();
                             self.request_redraw();
                             return;
                         }
@@ -1526,7 +1702,12 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             return;
                         }
                         MenuKeyOutcome::Execute(action) => {
-                            self.context_menu = None;
+                            if matches!(action, Action::SetTheme(_)) {
+                                self.theme_before_preview = None;
+                                self.context_menu = None;
+                            } else {
+                                self.close_context_menu();
+                            }
                             self.execute_action(action, event_loop);
                             self.request_redraw();
                             return;
@@ -1541,7 +1722,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         .cloned()
                 {
                     if !matches!(action, Action::ToggleContextMenu) {
-                        self.context_menu = None;
+                        self.close_context_menu();
                     }
                     self.execute_action(action, event_loop);
                     return;
@@ -1656,6 +1837,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         None
                     };
                     if let Some((changed, pointer)) = hover_res {
+                        self.sync_theme_preview();
                         self.set_cursor_icon(if pointer {
                             CursorIcon::Pointer
                         } else {
@@ -1728,8 +1910,11 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 }
 
                 // 4. Passive PTY mouse-motion reporting & cursor icon updates
-                let Some((sf, win_w, tab_h, cw, ch)) =
-                    self.gl_state.as_ref().zip(self.font_sys.as_ref()).map(|(gs, fs)| {
+                let Some((sf, win_w, tab_h, cw, ch)) = self
+                    .gl_state
+                    .as_ref()
+                    .zip(self.font_sys.as_ref())
+                    .map(|(gs, fs)| {
                         (
                             gs.window.scale_factor() as f32,
                             gs.window.inner_size().width as f32,
@@ -1817,7 +2002,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                 match target {
                                     StatusClickTarget::Execute(Action::ToggleContextMenu) => {
                                         if self.context_menu.is_some() {
-                                            self.context_menu = None;
+                                            self.close_context_menu();
                                             self.request_redraw();
                                         } else if px <= sb_geom.mode_pill.rect.w + 8.0 {
                                             self.open_context_menu(
@@ -1834,24 +2019,28 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                         }
                                     }
                                     StatusClickTarget::Execute(act) => {
-                                        self.context_menu = None;
+                                        if matches!(act, Action::SetTheme(_)) {
+                                            self.theme_before_preview = None;
+                                            self.context_menu = None;
+                                        } else {
+                                            self.close_context_menu();
+                                        }
                                         if !matches!(act, Action::ShowHelp) {
                                             self.help_dialog = None;
                                         }
                                         self.execute_action(act, event_loop);
                                     }
                                     StatusClickTarget::OpenThemeMenu => {
-                                        let already_theme_mode = self
-                                            .context_menu
-                                            .as_ref()
-                                            .is_some_and(|m| {
+                                        let already_theme_mode =
+                                            self.context_menu.as_ref().is_some_and(|m| {
                                                 m.submenu_open && m.sub_hovered.is_some()
                                             });
                                         if already_theme_mode {
-                                            self.context_menu = None;
+                                            self.close_context_menu();
                                             self.request_redraw();
                                         } else if let Some(menu) = &mut self.context_menu {
                                             menu.open_theme_submenu(&self.config.theme_name);
+                                            self.sync_theme_preview();
                                             self.request_redraw();
                                         } else {
                                             self.open_context_menu(
@@ -1912,6 +2101,11 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                 self.request_redraw();
                             }
                             HelpClickOutcome::Consumed => {}
+                            HelpClickOutcome::EditConfig => {
+                                self.help_dialog = None;
+                                self.open_config_in_editor();
+                                self.request_redraw();
+                            }
                         }
                     }
                     return;
@@ -1944,18 +2138,24 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     match outcome {
                         MenuClickOutcome::Execute(action) => {
                             if matches!(button, MouseButton::Left | MouseButton::Right) {
-                                self.context_menu = None;
+                                if matches!(action, Action::SetTheme(_)) {
+                                    self.theme_before_preview = None;
+                                    self.context_menu = None;
+                                } else {
+                                    self.close_context_menu();
+                                }
                                 self.execute_action(action, event_loop);
                                 self.request_redraw();
                             }
                             return;
                         }
                         MenuClickOutcome::ConsumedKeepOpen => {
+                            self.sync_theme_preview();
                             self.request_redraw();
                             return;
                         }
                         MenuClickOutcome::Outside => {
-                            self.context_menu = None;
+                            self.close_context_menu();
                             self.request_redraw();
                             if button != MouseButton::Right {
                                 return;
@@ -1995,7 +2195,10 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
                     .unwrap_or(0.0);
 
-                if state == ElementState::Pressed && tab_h > 0.0 && py < tab_h && !self.tabs.is_empty()
+                if state == ElementState::Pressed
+                    && tab_h > 0.0
+                    && py < tab_h
+                    && !self.tabs.is_empty()
                 {
                     let win_w = self
                         .gl_state
@@ -2054,7 +2257,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     && button == MouseButton::Left
                     && let Some(gl_state) = &self.gl_state
                 {
-                    let slop = (4.0 * gl_state.window.scale_factor() as f32).round().max(3.0);
+                    let slop = (4.0 * gl_state.window.scale_factor() as f32)
+                        .round()
+                        .max(3.0);
                     if let Some(div) = dividers.iter().find(|d| d.hit_test(px, py, slop)) {
                         self.dragging_divider = Some(DividerDragState {
                             path: div.path.clone(),
@@ -2067,14 +2272,14 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 }
 
                 // 6. Locate target split pane under cursor (and focus it on press)
-                let target_layout = if state == ElementState::Released && button == MouseButton::Left
-                {
-                    self.selecting_pane_id
-                        .and_then(|id| layouts.iter().find(|l| l.pane_id == id))
-                        .or_else(|| pane_at_point(&layouts, px, py))
-                } else {
-                    pane_at_point(&layouts, px, py)
-                };
+                let target_layout =
+                    if state == ElementState::Released && button == MouseButton::Left {
+                        self.selecting_pane_id
+                            .and_then(|id| layouts.iter().find(|l| l.pane_id == id))
+                            .or_else(|| pane_at_point(&layouts, px, py))
+                    } else {
+                        pane_at_point(&layouts, px, py)
+                    };
 
                 let Some(layout) = target_layout.copied() else {
                     return;
@@ -2207,7 +2412,8 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         (y * self.config.mouse_scroll_multiplier).round() as i32
                     }
                     MouseScrollDelta::PixelDelta(pos) => {
-                        self.pixel_scroll_accum += pos.y * self.config.mouse_scroll_multiplier as f64;
+                        self.pixel_scroll_accum +=
+                            pos.y * self.config.mouse_scroll_multiplier as f64;
                         let steps = (self.pixel_scroll_accum / cell_h).trunc() as i32;
                         self.pixel_scroll_accum -= steps as f64 * cell_h;
                         steps
@@ -2296,6 +2502,23 @@ impl ApplicationHandler<AppEvent> for OceanApp {
 
 #[allow(dead_code)]
 fn _assert_cstr(_: CString) {}
+
+fn editor_program() -> String {
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in path.split(':') {
+            let p = Path::new(dir).join("nano");
+            if p.is_file() {
+                return "nano".to_string();
+            }
+        }
+    }
+    for standard in &["/usr/bin/nano", "/bin/nano", "/usr/local/bin/nano"] {
+        if Path::new(standard).is_file() {
+            return standard.to_string();
+        }
+    }
+    std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string())
+}
 
 const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icons/64x64/ocean.png");
 

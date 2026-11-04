@@ -25,7 +25,10 @@ fn cell_myanmar_rep_char(cell: &CellInput<'_>) -> Option<char> {
     if is_myanmar_char(cell.c) {
         Some(cell.c)
     } else {
-        cell.zerowidth.iter().copied().find(|&ch| is_myanmar_char(ch))
+        cell.zerowidth
+            .iter()
+            .copied()
+            .find(|&ch| is_myanmar_char(ch))
     }
 }
 
@@ -255,11 +258,7 @@ impl TextShaper {
             span_cols,
             font_id,
             is_myanmar,
-            zawgyi_rank: if is_myanmar {
-                zawgyi_mode as u8
-            } else {
-                0
-            },
+            zawgyi_rank: if is_myanmar { zawgyi_mode as u8 } else { 0 },
             cell_w_bits: cell_w.to_bits(),
             font_px_bits: font_px.to_bits(),
         };
@@ -360,7 +359,7 @@ fn shape_uncached(
 
     if key.is_myanmar {
         // Continuous HarfBuzz OpenType `mym2`/`mymr` pen placement across the Myanmar run,
-        // with automatic horizontal containment when isolated wide consonants exceed cell span.
+        // preserving natural cursive ligatures, mark attachments, and syllable transitions.
         let mut pen_x: i32 = 0;
         let mut pen_y: i32 = 0;
         let mut raw_glyphs = Vec::with_capacity(infos.len());
@@ -402,10 +401,7 @@ fn shape_uncached(
         let mut i = 0;
         while i < infos.len() {
             let cluster = infos[i].cluster;
-            let rc = byte_to_rel_col
-                .get(cluster as usize)
-                .copied()
-                .unwrap_or(0);
+            let rc = byte_to_rel_col.get(cluster as usize).copied().unwrap_or(0);
             let cluster_base_x = rc as f32 * cell_w;
             let mut local_pen_x: i32 = 0;
             let mut local_pen_y: i32 = 0;
@@ -513,8 +509,7 @@ mod tests {
         let dotted_gid = font_sys.font(mm_font_id).glyph_id('\u{25CC}');
         let mut shaper = TextShaper::new();
 
-        let clean_line =
-            "  သာလီစွပါ! ဒီနေ့ ပရောဂျက်နဲ့ ပတ်သက်ပြီး ဘာများ ကူညီဆောင်ရွက်ပေးရမလဲ ပြောပြပေးပါ။";
+        let clean_line = "  သာလီစွပါ! ဒီနေ့ ပရောဂျက်နဲ့ ပတ်သက်ပြီး ဘာများ ကူညီဆောင်ရွက်ပေးရမလဲ ပြောပြပေးပါ။";
 
         // Shape clean reference via real `alacritty_terminal` VTE parser
         let clean_snap = snapshot_from_bytes(clean_line.as_bytes(), &cfg, 90, 4);
@@ -529,7 +524,12 @@ mod tests {
             })
             .collect();
         let mut clean_glyphs = Vec::new();
-        shaper.shape_row(&mut font_sys, &clean_inputs, ZawgyiMode::Off, &mut clean_glyphs);
+        shaper.shape_row(
+            &mut font_sys,
+            &clean_inputs,
+            ZawgyiMode::Off,
+            &mut clean_glyphs,
+        );
         assert!(!clean_glyphs.is_empty());
 
         // Simulate TUI cell serializers (Ink / xterm.js / agy) injecting zero-width separators

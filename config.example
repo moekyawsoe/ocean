@@ -73,6 +73,11 @@ window-show-tab-bar = auto
 # Neovim-style bottom shortcut & mode status bar (`true` / `false`, toggle live with `Ctrl+Shift+B`)
 window-show-status-bar = true
 
+# --- Updates & Releases ---
+# Frequency to check GitHub Releases in background: `daily` (default, 24h cache), `always`, `off`
+# When an update is available, a clickable badge appears in the bottom status bar and Context Menu.
+auto-update-check = daily
+
 # --- Shell, Scrollback, Mouse & Clipboard ---
 # command = /bin/bash
 # working-directory = inherit

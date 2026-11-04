@@ -10,6 +10,7 @@ use glow::HasContext;
 
 use crate::config::theme::Rgb;
 use crate::config::{Config, CursorStyle, TabBarMode};
+use crate::font::myanmar::is_myanmar_run_char;
 use crate::font::shaper::{CellInput, PositionedGlyph, TextShaper};
 use crate::font::{FontStyle, FontSystem};
 use crate::help::{HelpDialog, SECTION_TITLES, StyledLine};
@@ -185,6 +186,7 @@ impl RenderEngine {
         tabs: &[TabTitle<'_>],
         context_menu: Option<&ContextMenu>,
         help_dialog: Option<&HelpDialog>,
+        available_update: Option<&crate::update::UpdateInfo>,
         status_hover_id: Option<usize>,
         cursor_visible_blink: bool,
         window_focused: bool,
@@ -246,6 +248,7 @@ impl RenderEngine {
                 }),
                 context_menu,
                 help_dialog,
+                available_update,
             };
             self.emit_status_bar(
                 config,
@@ -262,8 +265,10 @@ impl RenderEngine {
         self.gpu_buffer_staging.reserve(
             self.bg_instances.len() + self.fg_instances.len() + self.overlay_instances.len(),
         );
-        self.gpu_buffer_staging.extend_from_slice(&self.bg_instances);
-        self.gpu_buffer_staging.extend_from_slice(&self.fg_instances);
+        self.gpu_buffer_staging
+            .extend_from_slice(&self.bg_instances);
+        self.gpu_buffer_staging
+            .extend_from_slice(&self.fg_instances);
         self.gpu_buffer_staging
             .extend_from_slice(&self.overlay_instances);
         (&mut self.atlas, &self.gpu_buffer_staging)
@@ -294,6 +299,7 @@ impl RenderEngine {
 
         // Pass 1 & 2 per row: emit cell backgrounds into `bg_instances` and glyphs/decorations into `fg_instances`
         let mut cell_inputs: Vec<CellInput<'_>> = Vec::with_capacity(num_cols);
+        let mut custom_cursor_cx: Option<f32> = None;
 
         for row in 0..num_rows {
             if (row + 1) * num_cols > snapshot.cells.len() {
@@ -314,8 +320,13 @@ impl RenderEngine {
                     }
                     let rx = origin_x + start as f32 * cw;
                     let rw = (c - start) as f32 * cw;
-                    self.bg_instances
-                        .push(QuadInstance::solid(rx, row_y, rw, ch, bg.to_f32_rgba(1.0)));
+                    self.bg_instances.push(QuadInstance::solid(
+                        rx,
+                        row_y,
+                        rw,
+                        ch,
+                        bg.to_f32_rgba(1.0),
+                    ));
                 } else {
                     c += 1;
                 }
@@ -432,6 +443,65 @@ impl RenderEngine {
                     kind: if entry.is_color { 2.0 } else { 1.0 },
                 });
             }
+
+            if row == snapshot.cursor_row && snapshot.cursor_col < num_cols {
+                let cur_c = snapshot.cursor_col;
+                if self.shaped_row_buf.iter().any(|g| g.is_myanmar) {
+                    let at_cell = &row_slice[cur_c];
+                    let is_current_empty = at_cell.c == ' ' || at_cell.c == '\0';
+
+                    if is_current_empty && cur_c > 0 {
+                        if let Some(prev_idx) = (0..cur_c)
+                            .rev()
+                            .find(|&i| row_slice[i].c != ' ' && row_slice[i].c != '\0')
+                        {
+                            let prev_cell = &row_slice[prev_idx];
+                            if is_myanmar_run_char(prev_cell.c)
+                                || prev_cell.zerowidth.iter().copied().any(is_myanmar_run_char)
+                            {
+                                let rightmost = self
+                                    .shaped_row_buf
+                                    .iter()
+                                    .filter(|g| g.col <= prev_idx)
+                                    .map(|g| {
+                                        let font_px = if g.is_myanmar {
+                                            font_sys.metrics.myanmar_font_px
+                                        } else {
+                                            font_sys.metrics.font_px
+                                        };
+                                        let entry = self.atlas.get_or_rasterize(
+                                            font_sys,
+                                            g.font_id,
+                                            g.glyph_id,
+                                            font_px,
+                                            config.font_thicken,
+                                        );
+                                        g.x + (entry.left as f32 + entry.width as f32) * g.x_scale
+                                    })
+                                    .fold(0.0_f32, f32::max);
+
+                                if rightmost > 0.0 {
+                                    let trailing_spaces =
+                                        (cur_c.saturating_sub(prev_idx + 1)) as f32 * cw;
+                                    let snapped_x = origin_x + rightmost + trailing_spaces;
+                                    let standard_x = origin_x + cur_c as f32 * cw;
+                                    if snapped_x < standard_x {
+                                        custom_cursor_cx = Some(snapped_x.round());
+                                    }
+                                }
+                            }
+                        }
+                    } else if !is_current_empty {
+                        if let Some(g) = self
+                            .shaped_row_buf
+                            .iter()
+                            .find(|g| g.col == cur_c && g.is_myanmar)
+                        {
+                            custom_cursor_cx = Some((origin_x + g.x).round());
+                        }
+                    }
+                }
+            }
         }
 
         // Cursor rendering (when at bottom of scrollback & visible)
@@ -441,9 +511,12 @@ impl RenderEngine {
             && snapshot.cursor_row < num_rows
             && snapshot.cursor_col < num_cols
         {
-            let cx = origin_x + snapshot.cursor_col as f32 * cw;
+            let cx = custom_cursor_cx.unwrap_or(origin_x + snapshot.cursor_col as f32 * cw);
             let cy = origin_y + snapshot.cursor_row as f32 * ch;
-            let cur_col = config.colors.cursor_color.to_f32_rgba(config.cursor_opacity);
+            let cur_col = config
+                .colors
+                .cursor_color
+                .to_f32_rgba(config.cursor_opacity);
             let cur_w = if snapshot.cells[snapshot.cursor_row * num_cols + snapshot.cursor_col].wide
             {
                 cw * 2.0
@@ -470,8 +543,13 @@ impl RenderEngine {
                         .push(QuadInstance::solid(cx, cy, thick, ch, cur_col));
                 }
                 CursorStyle::Underline => {
-                    self.fg_instances
-                        .push(QuadInstance::solid(cx, cy + ch - thick, cur_w, thick, cur_col));
+                    self.fg_instances.push(QuadInstance::solid(
+                        cx,
+                        cy + ch - thick,
+                        cur_w,
+                        thick,
+                        cur_col,
+                    ));
                 }
                 CursorStyle::BlockHollow => {
                     self.fg_instances
@@ -537,8 +615,13 @@ impl RenderEngine {
                 bg.b.saturating_sub(11),
             )
         };
-        self.bg_instances
-            .push(QuadInstance::solid(0.0, 0.0, win_w, tab_h, bar_bg.to_f32_rgba(0.98)));
+        self.bg_instances.push(QuadInstance::solid(
+            0.0,
+            0.0,
+            win_w,
+            tab_h,
+            bar_bg.to_f32_rgba(0.98),
+        ));
         // Bottom 1px divider
         self.fg_instances.push(QuadInstance::solid(
             0.0,
@@ -695,8 +778,11 @@ impl RenderEngine {
                     fg.to_f32_rgba(0.14),
                 ));
             } else {
-                let is_sub_parent =
-                    menu.submenu_open && matches!(menu.entries[row.entry_index], MenuEntry::ThemeSubmenu { .. });
+                let is_sub_parent = menu.submenu_open
+                    && matches!(
+                        menu.entries[row.entry_index],
+                        MenuEntry::ThemeSubmenu { .. }
+                    );
                 if menu.hovered == Some(row.entry_index) || is_sub_parent {
                     self.overlay_instances.push(QuadInstance::solid(
                         geom.x + 4.0,
@@ -874,7 +960,11 @@ impl RenderEngine {
                     ));
                 } else if let ThemeSubEntry::Theme(info) = &menu.sub_entries[s_row.entry_index] {
                     let is_hov = menu.sub_hovered == Some(s_row.entry_index);
-                    let is_active = info.id == config.theme_name;
+                    let is_active = menu
+                        .committed_theme
+                        .as_deref()
+                        .unwrap_or(&config.theme_name)
+                        == info.id;
                     if is_hov {
                         self.overlay_instances.push(QuadInstance::solid(
                             sub.x + 4.0,
@@ -1107,8 +1197,13 @@ impl RenderEngine {
         ));
 
         // 3. Modal card surface + header/tab strip + footer strip
-        self.overlay_instances
-            .push(QuadInstance::solid(m.x, m.y, m.w, m.h, card_bg.to_f32_rgba(0.995)));
+        self.overlay_instances.push(QuadInstance::solid(
+            m.x,
+            m.y,
+            m.w,
+            m.h,
+            card_bg.to_f32_rgba(0.995),
+        ));
         self.overlay_instances.push(QuadInstance::solid(
             m.x,
             m.y,
@@ -1144,12 +1239,34 @@ impl RenderEngine {
             ));
         }
 
+        // 4b. [Edit Config (nano)] button background & border
+        let eb = geom.edit_btn;
+        let eb_bg = if help.edit_hovered {
+            accent.to_f32_rgba(0.24)
+        } else {
+            card_bg.to_f32_rgba(0.85)
+        };
+        self.overlay_instances
+            .push(QuadInstance::solid(eb.x, eb.y, eb.w, eb.h, eb_bg));
+        let eb_border = if help.edit_hovered {
+            accent.to_f32_rgba(0.85)
+        } else {
+            fg.to_f32_rgba(0.25)
+        };
+        self.overlay_instances
+            .push(QuadInstance::hollow(eb.x, eb.y, eb.w, eb.h, eb_border));
+
         // 5. Section tab backgrounds & active tab underline
         for tab in &geom.tabs {
             let r = tab.rect;
             if tab.index == help.active_tab {
-                self.overlay_instances
-                    .push(QuadInstance::solid(r.x, r.y, r.w, r.h, card_bg.to_f32_rgba(1.0)));
+                self.overlay_instances.push(QuadInstance::solid(
+                    r.x,
+                    r.y,
+                    r.w,
+                    r.h,
+                    card_bg.to_f32_rgba(1.0),
+                ));
                 self.overlay_instances.push(QuadInstance::solid(
                     r.x,
                     r.y,
@@ -1241,10 +1358,10 @@ impl RenderEngine {
             fg.to_f32_rgba(0.26),
         ));
 
-        // 9. Header title & [X] close label
+        // 9. Header title, [Edit Config (nano)] & [X] close labels
         let hdr_text_top = m.y + ((geom.header_h - ch) * 0.5).round();
         let hdr_baseline = hdr_text_top + font_sys.metrics.baseline;
-        let title_max_chars = ((cb.x - (m.x + 16.0 * sf)) / cw).floor().max(8.0) as usize;
+        let title_max_chars = ((eb.x - (m.x + 16.0 * sf)) / cw).floor().max(8.0) as usize;
         Self::emit_shaped_label(
             &mut self.atlas,
             &mut self.shaper,
@@ -1256,6 +1373,37 @@ impl RenderEngine {
             (m.x + 14.0 * sf).round(),
             hdr_baseline,
             fg.ensure_contrast(chrome_bg, 4.5).to_f32_rgba(1.0),
+            true,
+        );
+
+        let eb_label = if eb.w >= cw * 19.0 {
+            "Edit Config (nano)"
+        } else if eb.w >= cw * 12.0 {
+            "nano config"
+        } else {
+            "nano"
+        };
+        let eb_chars = eb_label.chars().count();
+        let eb_lx = (eb.x + (eb.w - eb_chars as f32 * cw) * 0.5)
+            .round()
+            .max(eb.x + 4.0);
+        let eb_ly = eb.y + ((eb.h - ch) * 0.5).round() + font_sys.metrics.baseline;
+        let eb_fg = if help.edit_hovered {
+            accent.to_f32_rgba(1.0)
+        } else {
+            fg.ensure_contrast(chrome_bg, 4.5).to_f32_rgba(0.95)
+        };
+        Self::emit_shaped_label(
+            &mut self.atlas,
+            &mut self.shaper,
+            &mut self.overlay_instances,
+            config,
+            font_sys,
+            eb_label,
+            eb_chars,
+            eb_lx,
+            eb_ly,
+            eb_fg,
             true,
         );
 
@@ -1320,8 +1468,7 @@ impl RenderEngine {
 
         for (row_idx, line) in lines[scroll_line..end_line].iter().enumerate() {
             let ry = geom.body_y + row_idx as f32 * geom.line_h;
-            let baseline_y =
-                ry + ((geom.line_h - ch) * 0.5).round() + font_sys.metrics.baseline;
+            let baseline_y = ry + ((geom.line_h - ch) * 0.5).round() + font_sys.metrics.baseline;
 
             match line {
                 StyledLine::Heading(s) => {
@@ -1359,13 +1506,8 @@ impl RenderEngine {
                         let bsz = (4.5 * sf).round().max(4.0);
                         let bx = (geom.body_x + cw * 0.35).round();
                         let by = (ry + (geom.line_h - bsz) * 0.5).round();
-                        self.overlay_instances.push(QuadInstance::solid(
-                            bx,
-                            by,
-                            bsz,
-                            bsz,
-                            heading_fg,
-                        ));
+                        self.overlay_instances
+                            .push(QuadInstance::solid(bx, by, bsz, bsz, heading_fg));
                     }
                     Self::emit_shaped_label(
                         &mut self.atlas,
@@ -1435,7 +1577,7 @@ impl RenderEngine {
         // 12. Footer navigation hint + active theme indicator
         let f_baseline =
             geom.footer_y + ((geom.footer_h - ch) * 0.5).round() + font_sys.metrics.baseline;
-        let hint = "1-5 / h/l: Section  |  j/k / Space: Scroll  |  g/G: Top/End  |  Esc/q: Close";
+        let hint = "e: Edit Config (nano)  |  1-5 / h/l: Section  |  j/k: Scroll  |  g/G: Top/End  |  Esc/q: Close";
         Self::emit_shaped_label(
             &mut self.atlas,
             &mut self.shaper,
@@ -1535,7 +1677,11 @@ impl RenderEngine {
         } else {
             Rgb::new(255, 255, 255)
         };
-        let mode_alpha = if status_hover_id == Some(1) { 1.0 } else { 0.94 };
+        let mode_alpha = if status_hover_id == Some(1) {
+            1.0
+        } else {
+            0.94
+        };
         self.overlay_instances.push(QuadInstance::solid(
             geom.mode_pill.rect.x,
             geom.mode_pill.rect.y,
@@ -1721,6 +1867,37 @@ impl RenderEngine {
                 th_hov,
             );
         }
+
+        // 6. Right update pill (` ↑ v1.0.0 ` — click to install update)
+        if let Some(up) = &geom.update_pill {
+            let up_hov = status_hover_id == Some(5);
+            let up_bg = if up_hov {
+                config.colors.ansi[2].ensure_contrast(bg, 3.2)
+            } else {
+                config.colors.ansi[2].ensure_contrast(bg, 2.2)
+            };
+            self.overlay_instances.push(QuadInstance::solid(
+                up.rect.x,
+                up.rect.y,
+                up.rect.w,
+                up.rect.h,
+                up_bg.to_f32_rgba(if up_hov { 0.95 } else { 0.85 }),
+            ));
+            let up_fg = config.colors.background.ensure_contrast(up_bg, 4.5);
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.overlay_instances,
+                config,
+                font_sys,
+                &up.text,
+                24,
+                up.text_x,
+                baseline_y,
+                up_fg.to_f32_rgba(1.0),
+                true,
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1777,13 +1954,8 @@ impl RenderEngine {
             } else {
                 font_sys.metrics.font_px
             };
-            let entry = atlas.get_or_rasterize(
-                font_sys,
-                pg.font_id,
-                pg.glyph_id,
-                fpx,
-                config.font_thicken,
-            );
+            let entry =
+                atlas.get_or_rasterize(font_sys, pg.font_id, pg.glyph_id, fpx, config.font_thicken);
             if entry.width == 0 || entry.height == 0 {
                 continue;
             }
@@ -2014,11 +2186,7 @@ void main() {{
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
 
             let initial_cap = 8192 * std::mem::size_of::<QuadInstance>();
-            gl.buffer_data_size(
-                glow::ARRAY_BUFFER,
-                initial_cap as i32,
-                glow::STREAM_DRAW,
-            );
+            gl.buffer_data_size(glow::ARRAY_BUFFER, initial_cap as i32, glow::STREAM_DRAW);
 
             let stride = std::mem::size_of::<QuadInstance>() as i32;
             let attrs: [(u32, i32, i32); 6] = [
@@ -2149,8 +2317,7 @@ void main() {{
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
 
             let byte_len = std::mem::size_of_val(instances);
-            let raw_bytes =
-                std::slice::from_raw_parts(instances.as_ptr() as *const u8, byte_len);
+            let raw_bytes = std::slice::from_raw_parts(instances.as_ptr() as *const u8, byte_len);
 
             if byte_len > self.vbo_capacity_bytes {
                 self.vbo_capacity_bytes = byte_len.next_power_of_two();
@@ -2203,11 +2370,7 @@ unsafe fn compile_program(
     }
 }
 
-unsafe fn compile_shader(
-    gl: &glow::Context,
-    ty: u32,
-    src: &str,
-) -> Result<glow::Shader, String> {
+unsafe fn compile_shader(gl: &glow::Context, ty: u32, src: &str) -> Result<glow::Shader, String> {
     unsafe {
         let sh = gl
             .create_shader(ty)
@@ -2263,12 +2426,7 @@ pub fn save_scene_png(
                 }
 
                 let (sr, sg, sb, sa) = match kind {
-                    0 => (
-                        inst.color[0],
-                        inst.color[1],
-                        inst.color[2],
-                        inst.color[3],
-                    ),
+                    0 => (inst.color[0], inst.color[1], inst.color[2], inst.color[3]),
                     3 => {
                         let edge = lx < 1.5
                             || lx > inst.size[0] - 1.5
@@ -2277,12 +2435,7 @@ pub fn save_scene_png(
                         if !edge {
                             continue;
                         }
-                        (
-                            inst.color[0],
-                            inst.color[1],
-                            inst.color[2],
-                            inst.color[3],
-                        )
+                        (inst.color[0], inst.color[1], inst.color[2], inst.color[3])
                     }
                     1 | 2 => {
                         let u = (inst.uv_pos[0] + (lx / inst.size[0]) * inst.uv_size[0]) * aw - 0.5;
@@ -2440,7 +2593,7 @@ mod tests {
             },
         ];
 
-        let mut menu = ContextMenu::build(180.0, 96.0, true, 3, true, &config.keybinds);
+        let mut menu = ContextMenu::build(180.0, 96.0, true, 3, true, &config.keybinds, None);
         menu.hovered = menu.theme_submenu_entry_index();
         menu.submenu_open = true;
         menu.sub_hovered = Some(2); // Hover "Tokyo Night"
@@ -2456,6 +2609,7 @@ mod tests {
                 win_h,
                 1.0,
                 &tabs,
+                None,
                 None,
                 None,
                 None,
@@ -2483,6 +2637,7 @@ mod tests {
             1.0,
             &tabs,
             Some(&menu),
+            None,
             None,
             None,
             true,
@@ -2515,6 +2670,7 @@ mod tests {
             &tabs,
             None,
             Some(&help),
+            None,
             None,
             true,
             true,
@@ -2575,7 +2731,7 @@ mod tests {
                 },
             ];
             let mut light_menu =
-                ContextMenu::build(180.0, 96.0, true, 3, true, &light_cfg.keybinds);
+                ContextMenu::build(180.0, 96.0, true, 3, true, &light_cfg.keybinds, None);
             light_menu.hovered = light_menu.theme_submenu_entry_index();
             light_menu.submenu_open = true;
             light_menu.sub_hovered = Some(9); // Hover "Tokyo Night Light"
@@ -2589,6 +2745,7 @@ mod tests {
                 1.0,
                 &tabs,
                 Some(&light_menu),
+                None,
                 None,
                 None,
                 true,
@@ -2618,6 +2775,7 @@ mod tests {
                     None,
                     Some(&help),
                     None,
+                    None,
                     true,
                     true,
                 );
@@ -2632,5 +2790,76 @@ mod tests {
                 .expect("save light help preview png");
             }
         }
+    }
+
+    #[test]
+    fn verifies_cursor_aligns_flush_with_myanmar_sentence_end() {
+        let config = Config::default();
+        let mut font_sys = FontSystem::new(&config, 1.0);
+        let text = "မြန်မာစာရမလားစမ်းကြည့်တာပါ";
+        let snap = snapshot_from_bytes(text.as_bytes(), &config, 60, 4);
+
+        let cell_w = font_sys.metrics.cell_width;
+        let win_w = 60 * cell_w.round() as u32;
+        let win_h = 4 * font_sys.metrics.cell_height.round() as u32;
+
+        let scene = [PaneScene {
+            snapshot: &snap,
+            layout: PaneLayout {
+                pane_id: 1,
+                bounds_x: 0.0,
+                bounds_y: 0.0,
+                bounds_w: win_w as f32,
+                bounds_h: win_h as f32,
+                origin_x: 0.0,
+                origin_y: 0.0,
+                cols: 60,
+                rows: 4,
+            },
+            is_active: true,
+            ime_preedit: None,
+        }];
+
+        let mut engine = RenderEngine::new();
+        let (_, instances) = engine.build_scene(
+            &config,
+            &mut font_sys,
+            &scene,
+            &[],
+            win_w,
+            win_h,
+            1.0,
+            &[],
+            None,
+            None,
+            None,
+            None,
+            true,
+            true,
+        );
+
+        let ch = font_sys.metrics.cell_height;
+        let cursor_inst = instances
+            .iter()
+            .find(|inst| inst.kind == 0.0 && (inst.size[1] - ch).abs() < 0.1)
+            .expect("Cursor instance must be emitted in scene");
+
+        let max_glyph_right = instances
+            .iter()
+            .filter(|inst| inst.kind > 0.0 && inst.pos[1] < ch)
+            .map(|inst| inst.pos[0] + inst.size[0])
+            .fold(0.0_f32, f32::max);
+
+        let cursor_x = cursor_inst.pos[0];
+        let raw_col_x = snap.cursor_col as f32 * cell_w;
+
+        assert!(
+            cursor_x < raw_col_x - cell_w * 2.0,
+            "Cursor must not be placed at raw cell column with dead whitespace gap: cursor_x={cursor_x}, raw_col_x={raw_col_x}"
+        );
+        assert!(
+            (cursor_x - max_glyph_right).abs() <= cell_w * 1.5,
+            "Cursor must sit flush right against the last Myanmar glyph: cursor_x={cursor_x}, max_glyph_right={max_glyph_right}, cell_w={cell_w}"
+        );
     }
 }

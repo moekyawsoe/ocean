@@ -23,7 +23,10 @@ enum RawDocItem {
 pub enum StyledLine {
     Heading(String),
     Body(String),
-    Bullet { first: bool, text: String },
+    Bullet {
+        first: bool,
+        text: String,
+    },
     KeyRow {
         key: String,
         val: String,
@@ -57,6 +60,7 @@ pub struct HelpTabRect {
 pub struct HelpDialogGeometry {
     pub modal: HelpRect,
     pub close_btn: HelpRect,
+    pub edit_btn: HelpRect,
     pub tabs: Vec<HelpTabRect>,
     pub header_h: f32,
     pub tabs_y: f32,
@@ -77,6 +81,7 @@ pub enum HelpClickOutcome {
     Close,
     Redraw,
     Consumed,
+    EditConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +89,7 @@ pub enum HelpKeyOutcome {
     Close,
     Redraw,
     Consumed,
+    EditConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +98,7 @@ pub struct HelpDialog {
     pub scroll_line: usize,
     pub hovered_tab: Option<usize>,
     pub close_hovered: bool,
+    pub edit_hovered: bool,
 }
 
 impl Default for HelpDialog {
@@ -107,6 +114,7 @@ impl HelpDialog {
             scroll_line: 0,
             hovered_tab: None,
             close_hovered: false,
+            edit_hovered: false,
         }
     }
 
@@ -158,6 +166,15 @@ impl HelpDialog {
             h: close_h,
         };
 
+        let edit_label_w = (cw * 20.0 + 14.0 * sf).round();
+        let edit_w = edit_label_w.min((w - close_w - 60.0 * sf).max(40.0));
+        let edit_btn = HelpRect {
+            x: (close_btn.x - edit_w - 8.0 * sf).round(),
+            y: close_btn.y,
+            w: edit_w,
+            h: close_h,
+        };
+
         let tabs_y = y + header_h;
         let mut tabs = Vec::with_capacity(SECTION_TITLES.len());
         let mut tx = x + (10.0 * sf).round();
@@ -203,6 +220,7 @@ impl HelpDialog {
         HelpDialogGeometry {
             modal: HelpRect { x, y, w, h },
             close_btn,
+            edit_btn,
             tabs,
             header_h,
             tabs_y,
@@ -295,9 +313,10 @@ impl HelpDialog {
 
     /// Update mouse hover state. Returns `(needs_redraw, pointer_cursor)`.
     pub fn update_hover(&mut self, geom: &HelpDialogGeometry, px: f32, py: f32) -> (bool, bool) {
-        let prev = (self.hovered_tab, self.close_hovered);
+        let prev = (self.hovered_tab, self.close_hovered, self.edit_hovered);
         self.close_hovered = geom.close_btn.contains(px, py);
-        self.hovered_tab = if self.close_hovered {
+        self.edit_hovered = geom.edit_btn.contains(px, py);
+        self.hovered_tab = if self.close_hovered || self.edit_hovered {
             None
         } else {
             geom.tabs
@@ -305,8 +324,8 @@ impl HelpDialog {
                 .find(|t| t.rect.contains(px, py))
                 .map(|t| t.index)
         };
-        let changed = (self.hovered_tab, self.close_hovered) != prev;
-        let pointer = self.close_hovered || self.hovered_tab.is_some();
+        let changed = (self.hovered_tab, self.close_hovered, self.edit_hovered) != prev;
+        let pointer = self.close_hovered || self.edit_hovered || self.hovered_tab.is_some();
         (changed, pointer)
     }
 
@@ -318,6 +337,9 @@ impl HelpDialog {
     ) -> HelpClickOutcome {
         if !geom.modal.contains(px, py) || geom.close_btn.contains(px, py) {
             return HelpClickOutcome::Close;
+        }
+        if geom.edit_btn.contains(px, py) {
+            return HelpClickOutcome::EditConfig;
         }
         if let Some(tab) = geom.tabs.iter().find(|t| t.rect.contains(px, py)) {
             if self.active_tab != tab.index {
@@ -359,6 +381,8 @@ impl HelpDialog {
         match key {
             Key::Named(NamedKey::Escape) => HelpKeyOutcome::Close,
             Key::Character(s) if s.eq_ignore_ascii_case("q") => HelpKeyOutcome::Close,
+            Key::Character(s) if s.eq_ignore_ascii_case("e") => HelpKeyOutcome::EditConfig,
+            Key::Named(NamedKey::Enter) if self.edit_hovered => HelpKeyOutcome::EditConfig,
             Key::Named(NamedKey::ArrowRight) => {
                 self.active_tab = (self.active_tab + 1) % SECTION_TITLES.len();
                 self.scroll_line = 0;
@@ -601,9 +625,7 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
             ),
             RawDocItem::Spacer,
             RawDocItem::Heading("Tabs & Tab Bar"),
-            RawDocItem::Bullet(
-                "New Tab: press Ctrl+Shift+T (or click '+' on the tab bar).",
-            ),
+            RawDocItem::Bullet("New Tab: press Ctrl+Shift+T (or click '+' on the tab bar)."),
             RawDocItem::Bullet(
                 "Switch Tabs: cycle with Ctrl+Tab / Ctrl+Shift+Tab or Ctrl+PgDn / Ctrl+PgUp.",
             ),
@@ -616,8 +638,14 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
         ],
         2 => &[
             RawDocItem::Heading("Default Developer Keyboard Shortcuts"),
-            RawDocItem::KeyValue("Ctrl+Shift+P / Menu", "Open/close Context Menu at cursor (j/k/t/1-9)"),
-            RawDocItem::KeyValue("Ctrl+Shift+B", "Show or hide bottom Neovim-style shortcut bar"),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+P / Menu",
+                "Open/close Context Menu at cursor (j/k/t/1-9)",
+            ),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+B",
+                "Show or hide bottom Neovim-style shortcut bar",
+            ),
             RawDocItem::KeyValue("Ctrl+Shift+C / Ctrl+Ins", "Copy selection to clipboard"),
             RawDocItem::KeyValue("Ctrl+Shift+V / Shift+Ins", "Paste from clipboard"),
             RawDocItem::KeyValue("Ctrl+Shift+D / E", "Split active pane Right / Down"),
@@ -627,12 +655,32 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
             RawDocItem::KeyValue("Ctrl+Shift+T / W", "New tab / Close active split or tab"),
             RawDocItem::KeyValue("Ctrl+Tab / Ctrl+Shift+Tab", "Switch to next / previous tab"),
             RawDocItem::KeyValue("Ctrl+Shift+N", "Spawn a new Ocean window"),
-            RawDocItem::KeyValue("Ctrl+= / Ctrl+- / Ctrl+0", "Increase / decrease / reset font size"),
-            RawDocItem::KeyValue("Shift+PgUp / Shift+PgDn", "Scroll history up / down one page"),
-            RawDocItem::KeyValue("Shift+Home / Shift+End", "Jump to top / bottom of scrollback"),
-            RawDocItem::KeyValue("Ctrl+Shift+R / Ctrl+Shift+,", "Reload ~/.config/ocean/config live"),
+            RawDocItem::KeyValue(
+                "Ctrl+= / Ctrl+- / Ctrl+0",
+                "Increase / decrease / reset font size",
+            ),
+            RawDocItem::KeyValue(
+                "Shift+PgUp / Shift+PgDn",
+                "Scroll history up / down one page",
+            ),
+            RawDocItem::KeyValue(
+                "Shift+Home / Shift+End",
+                "Jump to top / bottom of scrollback",
+            ),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+R / Ctrl+Shift+,",
+                "Reload ~/.config/ocean/config live",
+            ),
             RawDocItem::KeyValue("Ctrl+Shift+M", "Toggle legacy Zawgyi-One display mode"),
             RawDocItem::KeyValue("Ctrl+Shift+?", "Open or close this Help & Docs dialog"),
+            RawDocItem::KeyValue(
+                "e (inside Help) / nano",
+                "View and edit ~/.config/ocean/config in nano",
+            ),
+            RawDocItem::KeyValue(
+                "Context Menu -> u",
+                "Upgrade to latest release when update badge appears",
+            ),
             RawDocItem::KeyValue("F11 / Ctrl+Shift+Q", "Toggle fullscreen / Quit Ocean"),
         ],
         3 => &[
@@ -640,8 +688,17 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
             RawDocItem::Body(
                 "Ocean uses Ghostty-compatible `key = value` configuration and hot-reloads automatically when you save the file or press Ctrl+Shift+R.",
             ),
-            RawDocItem::Code("ocean +init-config   # create ~/.config/ocean/config"),
-            RawDocItem::Code("ocean +show-config   # inspect active settings"),
+            RawDocItem::Spacer,
+            RawDocItem::Heading("View & Edit Config in Terminal (nano)"),
+            RawDocItem::Bullet(
+                "Press 'e' right now in this dialog (or click [Edit Config (nano)] above) to open ~/.config/ocean/config directly in nano on the terminal.",
+            ),
+            RawDocItem::Bullet(
+                "Save changes in nano with Ctrl+O (Ocean hot-reloads live instantly). Exit nano anytime with Ctrl+X to return to your previous session.",
+            ),
+            RawDocItem::Code("ocean +edit-config   # launch nano on config from shell"),
+            RawDocItem::Code("ocean +init-config   # create starter ~/.config/ocean/config"),
+            RawDocItem::Code("ocean +show-config   # inspect active resolved settings"),
             RawDocItem::Spacer,
             RawDocItem::Heading("Bottom Shortcut Bar & Borderless Mode"),
             RawDocItem::Code("window-show-status-bar = true   # toggle live: Ctrl+Shift+B"),
@@ -662,6 +719,14 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "5 Light Themes",
                 "ocean-light, tokyo-night-light, catppuccin-latte, gruvbox-light, solarized-light",
             ),
+            RawDocItem::Spacer,
+            RawDocItem::Heading("Auto Updates & GitHub Releases"),
+            RawDocItem::Bullet(
+                "Ocean automatically checks for latest releases on GitHub in the background without blocking startup or input latency.",
+            ),
+            RawDocItem::Code("auto-update-check = daily   # daily | always | off"),
+            RawDocItem::Code("ocean +check-update         # check for newer version online"),
+            RawDocItem::Code("ocean +update               # upgrade directly to latest version"),
         ],
         _ => &[
             RawDocItem::Heading("Myanmar / Burmese Script Support (မြန်မာဘာသာ)"),
@@ -740,8 +805,29 @@ mod tests {
         );
         assert_eq!(dlg.active_tab, 0);
         assert_eq!(
-            dlg.handle_key(&Key::Named(NamedKey::Escape), false, total, geom.visible_rows),
+            dlg.handle_key(
+                &Key::Named(NamedKey::Escape),
+                false,
+                total,
+                geom.visible_rows
+            ),
             HelpKeyOutcome::Close
+        );
+
+        // Verify [Edit Config (nano)] button geometry, hover, click, and 'e' key
+        assert!(geom.edit_btn.w > 40.0);
+        assert!(geom.edit_btn.x < geom.close_btn.x);
+        let eb_cx = geom.edit_btn.x + geom.edit_btn.w * 0.5;
+        let eb_cy = geom.edit_btn.y + geom.edit_btn.h * 0.5;
+        let (_, pointer) = dlg.update_hover(&geom, eb_cx, eb_cy);
+        assert!(pointer && dlg.edit_hovered);
+        assert_eq!(
+            dlg.handle_click(&geom, eb_cx, eb_cy),
+            HelpClickOutcome::EditConfig
+        );
+        assert_eq!(
+            dlg.handle_key(&Key::Character("e".into()), false, total, geom.visible_rows),
+            HelpKeyOutcome::EditConfig
         );
     }
 }

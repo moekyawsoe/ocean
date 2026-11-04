@@ -77,6 +77,8 @@ pub enum Action {
     SetTheme(String),
     NextTheme,
     ShowHelp,
+    EditConfig,
+    TriggerUpdate,
     Quit,
     SendText(Vec<u8>),
     Ignore,
@@ -148,10 +150,7 @@ pub fn default_keybinds() -> Vec<Keybind> {
         "ctrl+shift+question=show_help",
         "ctrl+shift+q=quit",
     ];
-    entries
-        .iter()
-        .filter_map(|s| parse_keybind(s))
-        .collect()
+    entries.iter().filter_map(|s| parse_keybind(s)).collect()
 }
 
 /// Parse Ghostty-style `mods+key=action[:arg]`, e.g. `ctrl+shift+c=copy_to_clipboard`
@@ -377,6 +376,10 @@ fn parse_action(rhs: &str) -> Option<Action> {
         }
         "next_theme" | "cycle_theme" => Some(Action::NextTheme),
         "show_help" | "toggle_help" | "help" => Some(Action::ShowHelp),
+        "edit_config" | "edit-config" | "open_config" | "open-config" => Some(Action::EditConfig),
+        "update" | "check_update" | "check-update" | "trigger_update" => {
+            Some(Action::TriggerUpdate)
+        }
         "quit" => Some(Action::Quit),
         "text" => Some(Action::SendText(unescape_bytes(arg.unwrap_or("")))),
         "csi" => {

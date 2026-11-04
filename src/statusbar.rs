@@ -78,6 +78,7 @@ pub struct StatusBarGeometry {
     pub chips: Vec<StatusChip>,
     pub zawgyi_pill: Option<StatusPill>,
     pub theme_pill: Option<StatusPill>,
+    pub update_pill: Option<StatusPill>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -111,6 +112,7 @@ pub struct StatusBarContext<'a> {
     pub tui_mode: bool,
     pub context_menu: Option<&'a ContextMenu>,
     pub help_dialog: Option<&'a HelpDialog>,
+    pub available_update: Option<&'a crate::update::UpdateInfo>,
 }
 
 impl StatusBarGeometry {
@@ -141,6 +143,12 @@ impl StatusBarGeometry {
         {
             return Some(4);
         }
+        if let Some(up) = &self.update_pill
+            && up.target.is_some()
+            && up.rect.contains(px, py)
+        {
+            return Some(5);
+        }
         for (i, chip) in self.chips.iter().enumerate() {
             if chip.target.is_some() && chip.hit_rect.contains(px, py) {
                 return Some(100 + i);
@@ -155,6 +163,7 @@ impl StatusBarGeometry {
             2 => self.info_pill.as_ref().and_then(|p| p.target.clone()),
             3 => self.zawgyi_pill.as_ref().and_then(|p| p.target.clone()),
             4 => self.theme_pill.as_ref().and_then(|p| p.target.clone()),
+            5 => self.update_pill.as_ref().and_then(|p| p.target.clone()),
             id if id >= 100 => self.chips.get(id - 100).and_then(|c| c.target.clone()),
             _ => None,
         }
@@ -302,6 +311,30 @@ impl StatusBarGeometry {
             }
         }
 
+        let mut update_pill = None;
+        if let Some(update) = ctx.available_update
+            && total_cols >= 50
+        {
+            let up_txt = format!(" ↑ v{} ", update.version);
+            let up_pad = (4.0 * sf).round();
+            let up_w = (up_txt.chars().count() as f32 * cw + up_pad * 2.0).round();
+            let up_x = (right_limit - up_w).round();
+            if up_x > left_cursor + 20.0 * cw {
+                update_pill = Some(StatusPill {
+                    rect: BarRect {
+                        x: up_x,
+                        y: bar_y + 1.0,
+                        w: up_w,
+                        h: (bar_h - 1.0).max(1.0),
+                    },
+                    text_x: (up_x + up_pad).round(),
+                    text: up_txt,
+                    target: Some(StatusClickTarget::Execute(Action::TriggerUpdate)),
+                });
+                right_limit = up_x - (8.0 * sf).round();
+            }
+        }
+
         // 4. Context-aware shortcut chips fitted cleanly into `[left_cursor .. right_limit]`
         let candidates = build_candidate_chips(mode, ctx, &config.keybinds);
         let mut chips = Vec::with_capacity(candidates.len());
@@ -362,6 +395,7 @@ impl StatusBarGeometry {
             chips,
             zawgyi_pill,
             theme_pill,
+            update_pill,
         })
     }
 }
@@ -611,6 +645,7 @@ mod tests {
             tui_mode: false,
             context_menu: None,
             help_dialog: None,
+            available_update: None,
         };
         let geom = StatusBarGeometry::compute(&cfg, &ctx, 9.0, 20.0, 1010, 660, 1.0)
             .expect("status bar visible by default");
@@ -648,7 +683,7 @@ mod tests {
     #[test]
     fn status_bar_switches_to_menu_and_split_modes_contextually() {
         let cfg = Config::default();
-        let mut menu = ContextMenu::build(120.0, 120.0, false, 2, true, &cfg.keybinds);
+        let mut menu = ContextMenu::build(120.0, 120.0, false, 2, true, &cfg.keybinds, None);
         menu.select_first_enabled();
 
         let menu_ctx = StatusBarContext {
@@ -659,6 +694,7 @@ mod tests {
             tui_mode: false,
             context_menu: Some(&menu),
             help_dialog: None,
+            available_update: None,
         };
         let menu_geom =
             StatusBarGeometry::compute(&cfg, &menu_ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
@@ -674,10 +710,46 @@ mod tests {
             tui_mode: false,
             context_menu: Some(&menu),
             help_dialog: None,
+            available_update: None,
         };
         let theme_geom =
             StatusBarGeometry::compute(&cfg, &theme_ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
         assert_eq!(theme_geom.mode, StatusMode::Theme);
         assert!(theme_geom.chips.iter().any(|c| c.key_text == "1-0"));
+    }
+
+    #[test]
+    fn status_bar_renders_and_clicks_update_pill_when_update_available() {
+        let cfg = Config::default();
+        let update = crate::update::UpdateInfo {
+            version: "1.0.0".to_string(),
+            tag_name: "v1.0.0".to_string(),
+            release_name: "Ocean v1.0.0".to_string(),
+            html_url: "https://github.com/moekyawsoe/ocean/releases/tag/v1.0.0".to_string(),
+            published_at: "2026-11-04".to_string(),
+            deb_url: None,
+            rpm_url: None,
+            tar_url: None,
+            sha256_url: None,
+            body: "Test notes".to_string(),
+        };
+        let ctx = StatusBarContext {
+            active_pane_index: 0,
+            num_panes: 1,
+            num_tabs: 1,
+            display_offset: 0,
+            tui_mode: false,
+            context_menu: None,
+            help_dialog: None,
+            available_update: Some(&update),
+        };
+        let geom = StatusBarGeometry::compute(&cfg, &ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
+        assert!(geom.update_pill.is_some());
+        let pill = geom.update_pill.as_ref().unwrap();
+        assert!(pill.text.contains("v1.0.0"));
+        assert_eq!(
+            geom.click_at(pill.rect.x + 2.0, pill.rect.y + 2.0),
+            Some(StatusClickTarget::Execute(Action::TriggerUpdate))
+        );
     }
 }

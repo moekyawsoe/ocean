@@ -3,11 +3,7 @@ use winit::event::{KeyEvent, MouseButton};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 /// Encode a `winit` keyboard press into VT/xterm PTY bytes.
-pub fn encode_key_event(
-    event: &KeyEvent,
-    mods: ModifiersState,
-    mode: TermMode,
-) -> Option<Vec<u8>> {
+pub fn encode_key_event(event: &KeyEvent, mods: ModifiersState, mode: TermMode) -> Option<Vec<u8>> {
     let ctrl = mods.control_key();
     let alt = mods.alt_key();
     let shift = mods.shift_key();
@@ -232,7 +228,11 @@ pub fn encode_mouse_button(
         let suffix = if pressed || motion { 'M' } else { 'm' };
         Some(format!("\x1b[<{code};{cx};{cy}{suffix}").into_bytes())
     } else if cx <= 223 && cy <= 223 {
-        let btn = if !pressed && !motion { 3 + (code & 28) } else { code };
+        let btn = if !pressed && !motion {
+            3 + (code & 28)
+        } else {
+            code
+        };
         Some(vec![
             0x1b,
             b'[',

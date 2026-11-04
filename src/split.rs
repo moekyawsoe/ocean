@@ -55,12 +55,7 @@ impl SplitNode {
         }
     }
 
-    pub fn split_leaf(
-        &mut self,
-        target_id: u64,
-        new_id: u64,
-        direction: SplitDirection,
-    ) -> bool {
+    pub fn split_leaf(&mut self, target_id: u64, new_id: u64, direction: SplitDirection) -> bool {
         let (axis, put_second) = match direction {
             SplitDirection::Right | SplitDirection::Auto => (SplitAxis::Horizontal, true),
             SplitDirection::Left => (SplitAxis::Horizontal, false),
@@ -284,7 +279,13 @@ impl PaneLayout {
         dx * dx + dy * dy
     }
 
-    pub fn pixel_to_cell(&self, px: f32, py: f32, cell_w: f32, cell_h: f32) -> (usize, usize, Side) {
+    pub fn pixel_to_cell(
+        &self,
+        px: f32,
+        py: f32,
+        cell_w: f32,
+        cell_h: f32,
+    ) -> (usize, usize, Side) {
         let cw = cell_w.max(1.0);
         let ch = cell_h.max(1.0);
         let rx = (px - self.origin_x).max(0.0);
@@ -519,9 +520,10 @@ pub fn pane_at_point(layouts: &[PaneLayout], px: f32, py: f32) -> Option<&PaneLa
     if let Some(exact) = layouts.iter().find(|l| l.contains(px, py)) {
         return Some(exact);
     }
-    layouts
-        .iter()
-        .min_by(|a, b| a.distance_sq_to(px, py).total_cmp(&b.distance_sq_to(px, py)))
+    layouts.iter().min_by(|a, b| {
+        a.distance_sq_to(px, py)
+            .total_cmp(&b.distance_sq_to(px, py))
+    })
 }
 
 pub fn find_neighbor_pane(

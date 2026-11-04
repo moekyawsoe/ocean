@@ -35,6 +35,7 @@ pub enum AppEvent {
         Arc<dyn Fn(VteRgb) -> String + Sync + Send + 'static>,
     ),
     ChildExited(u64),
+    UpdateAvailable(crate::update::UpdateInfo),
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -46,6 +47,9 @@ impl std::fmt::Debug for AppEvent {
             Self::PtyReply(id, _) => write!(f, "PtyReply({id})"),
             Self::ColorQuery(id, idx, _) => write!(f, "ColorQuery({id}, {idx})"),
             Self::ChildExited(id) => write!(f, "ChildExited({id})"),
+            Self::UpdateAvailable(info) => {
+                write!(f, "UpdateAvailable({})", info.version)
+            }
         }
     }
 }
@@ -66,16 +70,22 @@ impl EventListener for OceanListener {
                 }
             }
             TermEvent::Title(t) => {
-                let _ = self.proxy.send_event(AppEvent::TitleChanged(self.tab_id, Some(t)));
+                let _ = self
+                    .proxy
+                    .send_event(AppEvent::TitleChanged(self.tab_id, Some(t)));
             }
             TermEvent::ResetTitle => {
-                let _ = self.proxy.send_event(AppEvent::TitleChanged(self.tab_id, None));
+                let _ = self
+                    .proxy
+                    .send_event(AppEvent::TitleChanged(self.tab_id, None));
             }
             TermEvent::ClipboardStore(_, text) => {
                 let _ = self.proxy.send_event(AppEvent::ClipboardStore(text));
             }
             TermEvent::PtyWrite(reply) => {
-                let _ = self.proxy.send_event(AppEvent::PtyReply(self.tab_id, reply));
+                let _ = self
+                    .proxy
+                    .send_event(AppEvent::PtyReply(self.tab_id, reply));
             }
             TermEvent::ColorRequest(index, fmt) => {
                 let _ = self
@@ -155,6 +165,7 @@ pub struct TerminalSnapshot {
     pub mode: TermMode,
 }
 
+
 pub struct TerminalSession {
     pub id: u64,
     pub title: String,
@@ -222,7 +233,7 @@ impl TerminalSession {
         env.insert("TERM_PROGRAM".to_string(), "ocean".to_string());
         env.insert(
             "TERM_PROGRAM_VERSION".to_string(),
-            env!("CARGO_PKG_VERSION").to_string(),
+            crate::update::running_version(),
         );
 
         // Guarantee UTF-8 locale so Myanmar/Burmese multibyte I/O works in bash/readline/zsh/python/nvim
@@ -250,7 +261,8 @@ impl TerminalSession {
             cell_height: cell_h.max(1),
         };
 
-        let pty = tty::new(&pty_opts, win_size, id).map_err(|e| format!("PTY spawn failed: {e}"))?;
+        let pty =
+            tty::new(&pty_opts, win_size, id).map_err(|e| format!("PTY spawn failed: {e}"))?;
         #[cfg(unix)]
         let shell_pid = Some(pty.child().id());
         #[cfg(not(unix))]
@@ -260,10 +272,7 @@ impl TerminalSession {
         let notifier = Notifier(event_loop.channel());
         let _io_thread = event_loop.spawn();
 
-        let title = config
-            .title
-            .clone()
-            .unwrap_or_else(|| "ocean".to_string());
+        let title = config.title.clone().unwrap_or_else(|| "ocean".to_string());
 
         Ok(Self {
             id,
@@ -401,11 +410,12 @@ impl TerminalSession {
                 let rest = &line_str[byte_start..];
                 let url_end_len = rest
                     .find(|c: char| {
-                        c.is_whitespace() || matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | '[' | ']')
+                        c.is_whitespace()
+                            || matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | '[' | ']')
                     })
                     .unwrap_or(rest.len());
-                let candidate = rest[..url_end_len]
-                    .trim_end_matches(['.', ',', ';', ':', '!', '?']);
+                let candidate =
+                    rest[..url_end_len].trim_end_matches(['.', ',', ';', ':', '!', '?']);
                 let char_start = line_str[..byte_start].chars().count();
                 let char_end = char_start + candidate.chars().count();
                 if char_end > char_start
@@ -455,7 +465,8 @@ pub fn snapshot_from_term<T: EventListener>(
 
     let cursor_pt = grid.cursor.point;
     let cursor_shape = term.cursor_style().shape;
-    let cursor_visible = mode.contains(TermMode::SHOW_CURSOR) && cursor_shape != CursorShape::Hidden;
+    let cursor_visible =
+        mode.contains(TermMode::SHOW_CURSOR) && cursor_shape != CursorShape::Hidden;
     let cursor_style = match cursor_shape {
         CursorShape::Block => config.cursor_style,
         CursorShape::Beam => CursorStyle::Bar,
@@ -622,4 +633,3 @@ fn split_command_words(s: &str) -> Vec<String> {
     }
     words
 }
-
