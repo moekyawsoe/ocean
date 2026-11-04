@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ocean Terminal — Fast Rust GPU Terminal with Native Myanmar Support</title>
+  <meta
+    name="description"
+    content="Clean, lightweight, GPU-accelerated terminal emulator written in Rust with full Myanmar/Burmese OpenType shaping, keyboard-first splits, and Ghostty-style config."
+  />
+  <link rel="icon" type="image/svg+xml" href="./assets/ocean.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Sticky Minimal Architectural Navbar -->
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="#top" class="brand">
+        <img src="./assets/ocean.svg" alt="Ocean Terminal Logo" class="brand-logo" />
+        <span>Ocean</span>
+        <span class="brand-badge">Rust + OpenGL</span>
+      </a>
+
+      <nav class="main-nav" aria-label="Primary Navigation">
+        <a href="#features">Features</a>
+        <a href="#myanmar">Myanmar</a>
+        <a href="#download">Download</a>
+        <a href="#usage">Usage</a>
+        <a href="#config">Config</a>
+        <a href="#shortcuts">Shortcuts</a>
+      </nav>
+
+      <div class="header-actions">
+        <span class="shortcut-hint" title="Open in-app Context Menu">
+          <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd>
+        </span>
+        <a
+          href="https://github.com/moekyawsoe/ocean"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-secondary btn-sm"
+        >
+          GitHub
+        </a>
+        <a href="#download" class="btn btn-primary btn-sm">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top" class="rail-shell">
+    <!-- Hero Section -->
+    <section class="section-band hero">
+      <div class="hero-pill">
+        <strong>Ocean Terminal</strong>
+        <span>•</span>
+        <span>Single-draw-call GPU engine • Native Myanmar (`မြန်မာဘာသာ`) shaping</span>
+      </div>
+
+      <div class="hero-logo-wrap">
+        <img src="./assets/ocean.svg" alt="Ocean vector logo" class="hero-logo" />
+      </div>
+
+      <h1 class="hero-headline">
+        The terminal engineered for <em>speed</em> and <em>script</em>.
+      </h1>
+
+      <p class="hero-subtitle">
+        A clean, minimal, GPU-accelerated terminal emulator written in Rust — combining
+        <strong>0% idle CPU</strong>, HarfBuzz OpenType Myanmar/Burmese shaping with zero dotted circles,
+        keyboard-first splits, and Ghostty-compatible configuration.
+      </p>
+
+      <div class="hero-cta-row">
+        <a href="#download" class="btn btn-primary">Download for Linux (.deb / .rpm)</a>
+        <a href="#usage" class="btn btn-secondary">Read Instructions &amp; Usage</a>
+        <a
+          href="https://github.com/moekyawsoe/ocean/releases/latest"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-secondary"
+        >
+          All Releases
+        </a>
+      </div>
+
+      <div class="hero-quick-cmd">
+        <span class="prompt">$</span>
+        <code id="hero-cmd">curl -LO https://github.com/moekyawsoe/ocean/releases/latest/download/ocean_amd64.deb &amp;&amp; sudo apt install ./ocean_amd64.deb</code>
+        <button type="button" class="copy-btn" data-copy-target="hero-cmd">Copy</button>
+      </div>
+
+      <!-- Pure-CSS Interactive Screenshot Stage -->
+      <div class="showcase-stage">
+        <input type="radio" name="showcase" id="tab-dark" class="showcase-radio" checked />
+        <input type="radio" name="showcase" id="tab-splits" class="showcase-radio" />
+        <input type="radio" name="showcase" id="tab-light" class="showcase-radio" />
+
+        <div class="showcase-tabs">
+          <label for="tab-dark" class="showcase-tab-label">01 · Ocean Dark &amp; Myanmar Shaping</label>
+          <label for="tab-splits" class="showcase-tab-label">02 · Split Panes, Tabs &amp; Theme Menu</label>
+          <label for="tab-light" class="showcase-tab-label">03 · Ocean Light Mode</label>
+        </div>
+
+        <div class="showcase-frame">
+          <div class="showcase-panel panel-dark">
+            <div class="window-chrome">
+              <img
+                src="./assets/ocean-myanmar-dark.png"
+                alt="Ocean Terminal in Ocean Dark theme rendering Myanmar/Burmese OpenType shaping, box drawing, and Neovim-style status bar"
+              />
+            </div>
+            <div class="showcase-caption">
+              <strong>Ocean Dark</strong> — HarfBuzz <code>mym2</code> shaping, razor-sharp procedural box drawing, and context-aware bottom shortcut bar.
+            </div>
+          </div>
+
+          <div class="showcase-panel panel-splits">
+            <div class="window-chrome">
+              <img
+                src="./assets/ocean-splits-menu.png"
+                alt="Ocean Terminal showing side-by-side split panes, top tab bar, and live Switch Theme context menu"
+              />
+            </div>
+            <div class="showcase-caption">
+              <strong>Keyboard-First Splits &amp; Context Menu</strong> — Press <kbd>Ctrl+Shift+P</kbd> anytime to open the Vim-navigable menu &amp; live theme switcher.
+            </div>
+          </div>
+
+          <div class="showcase-panel panel-light">
+            <div class="window-chrome">
+              <img
+                src="./assets/ocean-light.png"
+                alt="Ocean Terminal in crisp high-contrast Ocean Light mode"
+              />
+            </div>
+            <div class="showcase-caption">
+              <strong>Ocean Light</strong> — High-contrast daytime typography among 10 curated built-in themes (5 Dark + 5 Light).
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Performance & Engineering Metrics Strip -->
+    <section class="section-band">
+      <div class="metrics-grid">
+        <div class="metric-cell">
+          <div class="metric-value">1 Draw Call</div>
+          <div class="metric-label">OpenGL 3.3 / GLES 3.0 instanced quad batching</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-value">0% Idle CPU</div>
+          <div class="metric-label">Pure event-driven <code>ControlFlow::Wait</code> loop</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-value">mym2 / mymr</div>
+          <div class="metric-label">Full Myanmar OpenType shaping + UTN #11 normalization</div>
+        </div>
+        <div class="metric-cell">
+          <div class="metric-value">10 Themes</div>
+          <div class="metric-label">5 Dark + 5 Light built in with instant hot-reload</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Core Pillars Architectural Grid -->
+    <section id="features" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Architecture</div>
+        <h2 class="section-title">Minimal footprint. Zero compromises.</h2>
+        <p class="section-desc">
+          Built from scratch in Rust around <code>alacritty_terminal</code>, <code>glutin</code>, <code>glow</code>,
+          <code>rustybuzz</code>, and <code>swash</code> — no Electron, no GTK bloat, and only standard C runtime links.
+        </p>
+      </div>
+
+      <div class="bento-grid">
+        <article class="bento-card">
+          <div class="bento-index">01 / GPU RENDERER</div>
+          <h3>Single-Draw-Call OpenGL Engine</h3>
+          <p>
+            Every background cell, shaped glyph, color emoji, split divider, and status pill is packed into a single
+            instanced GPU draw call per frame.
+          </p>
+          <ul class="bento-list">
+            <li>Shelf-packed <code>swash</code> alpha &amp; RGBA emoji glyph atlas</li>
+            <li>O(1) <code>FxHashMap</code> shaped-run memoization across rows</li>
+            <li>Procedural GPU box-drawing (<code>╭─┬─╮</code>) for crisp TUI borders</li>
+            <li>Coalesced PTY reader for tear-free high-throughput output</li>
+          </ul>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-index">02 / KEYBOARD WORKFLOW</div>
+          <h3>Splits, Tabs &amp; Neovim-Style Bar</h3>
+          <p>
+            Designed for developers who live on the home row, with discoverable shortcuts right in the bottom status bar.
+          </p>
+          <ul class="bento-list">
+            <li>Live mode indicator (<code>OCEAN</code>, <code>TUI</code>, <code>SCROLL</code>, <code>MENU</code>, <code>THEME</code>, <code>HELP</code>)</li>
+            <li>Cursor-anchored Context Menu via <kbd>Ctrl+Shift+P</kbd> with <kbd>j</kbd>/<kbd>k</kbd> &amp; mnemonics</li>
+            <li>Split right/down (<kbd>Ctrl+Shift+D</kbd>/<kbd>E</kbd>), focus (<kbd>Alt+Shift+H/J/K/L</kbd>), resize &amp; equalize</li>
+            <li>Auto-hiding tab bar when a single tab is open for a distraction-free canvas</li>
+          </ul>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-index">03 / MYANMAR &amp; IME</div>
+          <h3>Native Burmese Typography &amp; Input</h3>
+          <p>
+            First-class support for <code>U+1000..U+109F</code>, <code>U+AA60..U+AA7F</code>, and <code>U+A9E0..U+A9FF</code>
+            without clipped vowels or broken clusters.
+          </p>
+          <ul class="bento-list">
+            <li>2-layer vertical compositing prevents upper/lower mark clipping</li>
+            <li>Native Wayland (<code>zwp_text_input_v3</code>) &amp; X11 (<code>XIM</code>) live preedit overlay</li>
+            <li>Automatic UTN #11 combining-order normalization while typing</li>
+            <li>One-key Zawgyi-One legacy log display toggle (<kbd>Ctrl+Shift+M</kbd>)</li>
+          </ul>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-index">04 / GHOSTTY CONFIG</div>
+          <h3>Clean <code>key = value</code> Configuration</h3>
+          <p>
+            Drop a clean plain-text file at <code>~/.config/ocean/config</code> — changes apply live the moment you save.
+          </p>
+          <ul class="bento-list">
+            <li>Supports <code>font-family</code>, <code>font-family-myanmar</code>, <code>theme</code>, <code>background-opacity</code></li>
+            <li>Ghostty-compatible <code>keybind = mods+key=action</code> bindings</li>
+            <li>Built-in CLI diagnostics: <code>+init-config</code>, <code>+validate-config</code>, <code>+show-config</code></li>
+            <li>Loads custom Ghostty theme files from <code>~/.config/ocean/themes/</code></li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <!-- Myanmar Shaping Deep Dive -->
+    <section id="myanmar" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Myanmar / Burmese Support</div>
+        <h2 class="section-title">Every syllable shaped accurately — zero dotted circles.</h2>
+        <p class="section-desc">
+          Most GPU terminals render cells strictly one codepoint at a time, breaking Burmese pre-base vowels, Kinzi,
+          and stacked consonants. Ocean shapes complete grapheme &amp; script runs with HarfBuzz (<code>rustybuzz</code>).
+        </p>
+
+        <div class="myanmar-split">
+          <div class="myanmar-specimen">
+            <div class="specimen-row">
+              <div class="specimen-tag">Kinzi + Tall AA</div>
+              <div class="specimen-text">မင်္ဂလာပါ — မြန်မာဘာသာစကားနှင့် စာပေ</div>
+            </div>
+            <div class="specimen-row">
+              <div class="specimen-tag">Stacked Subjoined Consonants &amp; Medials</div>
+              <div class="specimen-text">ပြည်ထောင်စုသမ္မတမြန်မာနိုင်ငံတော် • ဗုဒ္ဓဘာသာ • ဣန္ဒြေ • တက္ကသိုလ်</div>
+            </div>
+            <div class="specimen-row">
+              <div class="specimen-tag">UTN #11 Auto-Normalization</div>
+              <div class="specimen-text"><code>ကုိ</code> → <strong>ကို</strong> &nbsp;•&nbsp; <code>ကေြ</code> → <strong>ကြေ</strong></div>
+            </div>
+            <div class="specimen-row">
+              <div class="specimen-tag">Myanmar Digits &amp; Punctuation</div>
+              <div class="specimen-text">၀ ၁ ၂ ၃ ၄ ၅ ၆ ၇ ၈ ၉ — ရန်ကုန်မြို့ နှင့် မန္တလေးမြို့။</div>
+            </div>
+          </div>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>Diagnostic Check</span>
+              <span>ocean +myanmar-check</span>
+            </div>
+            <pre><span class="tok-cmd">$ ocean +myanmar-check</span>
+Ocean Myanmar/Burmese Shaping Diagnostic
+  Primary font : Cascadia Code NF
+  Myanmar font : Padauk
+  Cell metrics : 9x22 px (baseline=17 px, mm_px=13.0)
+  [<span class="tok-val">PASS</span>] Greeting (Kinzi + Tall AA)   -&gt; မင်္ဂလာပါ
+  [<span class="tok-val">PASS</span>] Official Country Name        -&gt; ပြည်ထောင်စု...
+  [<span class="tok-val">PASS</span>] Pre-base E + Medial Ra+Wa    -&gt; ကြွေးမြီ
+  [<span class="tok-val">PASS</span>] Stacked Pali Consonants      -&gt; ဗုဒ္ဓဘာသာ နှင့် ဣန္ဒြေ
+  [<span class="tok-val">PASS</span>] Upper+Lower Marks            -&gt; ရန်ကုန်မြို့ ...
+  [<span class="tok-val">PASS</span>] Myanmar Digits               -&gt; ၀၁၂၃၄၅၆၇၈၉</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download & Package Installation Section -->
+    <section id="download" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Download &amp; Install</div>
+        <h2 class="section-title">Install Ocean on Linux in seconds.</h2>
+        <p class="section-desc">
+          Every tagged release (<code>v*</code>) automatically builds signed-checksum <code>.deb</code>, <code>.rpm</code>,
+          and portable binary packages via GitHub Actions with full desktop icons and launcher integration.
+        </p>
+
+        <div class="download-cards">
+          <!-- Debian / Ubuntu -->
+          <div class="dl-card featured">
+            <div>
+              <span class="dl-os-tag">DEBIAN / UBUNTU • .DEB</span>
+              <h3>Debian, Ubuntu &amp; Mint</h3>
+              <p>For Ubuntu 22.04+, Debian 12+, Linux Mint, Pop!_OS, Zorin, and Kali (<code>amd64</code>).</p>
+              <pre class="dl-code" id="cmd-deb">curl -LO https://github.com/moekyawsoe/ocean/releases/latest/download/ocean_amd64.deb
+sudo apt install ./ocean_amd64.deb</pre>
+            </div>
+            <div class="dl-actions">
+              <a
+                href="https://github.com/moekyawsoe/ocean/releases/latest/download/ocean_amd64.deb"
+                class="btn btn-primary"
+              >
+                Download .deb (x86_64)
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" data-copy-target="cmd-deb">
+                Copy apt command
+              </button>
+            </div>
+          </div>
+
+          <!-- Fedora / RHEL / openSUSE -->
+          <div class="dl-card">
+            <div>
+              <span class="dl-os-tag">FEDORA / RHEL • .RPM</span>
+              <h3>Fedora, RHEL &amp; openSUSE</h3>
+              <p>For Fedora, RHEL 9+, Rocky Linux, AlmaLinux, and openSUSE Tumbleweed/Leap (<code>x86_64</code>).</p>
+              <pre class="dl-code" id="cmd-rpm">sudo dnf install https://github.com/moekyawsoe/ocean/releases/latest/download/ocean.x86_64.rpm</pre>
+            </div>
+            <div class="dl-actions">
+              <a
+                href="https://github.com/moekyawsoe/ocean/releases/latest/download/ocean.x86_64.rpm"
+                class="btn btn-primary"
+              >
+                Download .rpm (x86_64)
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" data-copy-target="cmd-rpm">
+                Copy dnf command
+              </button>
+            </div>
+          </div>
+
+          <!-- Tarball / Source -->
+          <div class="dl-card">
+            <div>
+              <span class="dl-os-tag">PORTABLE / CARGO</span>
+              <h3>Tarball or Build from Source</h3>
+              <p>Run the standalone single binary on any Linux distro or compile with Cargo.</p>
+              <pre class="dl-code" id="cmd-src">git clone https://github.com/moekyawsoe/ocean.git
+cd ocean
+cargo build --release</pre>
+            </div>
+            <div class="dl-actions">
+              <a
+                href="https://github.com/moekyawsoe/ocean/releases/latest/download/ocean-linux-x86_64.tar.gz"
+                class="btn btn-secondary"
+              >
+                Download .tar.gz (x86_64)
+              </a>
+              <button type="button" class="btn btn-secondary btn-sm" data-copy-target="cmd-src">
+                Copy build commands
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="release-note-bar">
+          <span>
+            Recommended Myanmar Unicode font: <code>sudo apt install fonts-padauk</code> (Debian/Ubuntu) or
+            <code>sudo dnf install sil-padauk-fonts</code> (Fedora).
+          </span>
+          <a href="https://github.com/moekyawsoe/ocean/releases" target="_blank" rel="noopener noreferrer">
+            View Release Notes &amp; SHA256SUMS →
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Instructions & CLI Usage -->
+    <section id="usage" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Instructions &amp; Usage</div>
+        <h2 class="section-title">Up and running in four steps.</h2>
+        <p class="section-desc">
+          Ocean works immediately with zero configuration, auto-discovering your best installed Monospace and
+          Myanmar/Burmese system fonts. When you want to customize, Ghostty-style <code>+actions</code> are built right in.
+        </p>
+
+        <div class="usage-grid">
+          <ol class="step-list">
+            <li class="step-item">
+              <div class="step-num">Step 01</div>
+              <h4>Launch Ocean</h4>
+              <p>Open <strong>Ocean Terminal</strong> from your desktop launcher or run <code>ocean</code> in any shell.</p>
+            </li>
+            <li class="step-item">
+              <div class="step-num">Step 02</div>
+              <h4>Generate Starter Config</h4>
+              <p>Run <code>ocean +init-config</code> to create a documented Ghostty-style config at <code>~/.config/ocean/config</code>.</p>
+            </li>
+            <li class="step-item">
+              <div class="step-num">Step 03</div>
+              <h4>Verify Fonts &amp; Myanmar Shaping</h4>
+              <p>Run <code>ocean +list-fonts</code> and <code>ocean +myanmar-check</code> to confirm system fonts and OpenType shaping.</p>
+            </li>
+            <li class="step-item">
+              <div class="step-num">Step 04</div>
+              <h4>Explore Menus, Splits &amp; Help</h4>
+              <p>Press <kbd>Ctrl+Shift+P</kbd> for the Context Menu, <kbd>Ctrl+Shift+D</kbd> to split panes, or <kbd>Ctrl+Shift+?</kbd> for built-in docs.</p>
+            </li>
+          </ol>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>Ghostty-Style CLI Actions &amp; Flags</span>
+              <span>ocean --help</span>
+            </div>
+            <pre><span class="tok-comment"># Create starter config at ~/.config/ocean/config</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+init-config</span>
+
+<span class="tok-comment"># List discovered Monospace &amp; Myanmar/Burmese fonts</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+list-fonts</span>
+
+<span class="tok-comment"># List all 10 built-in dark &amp; light themes</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+list-themes</span>
+
+<span class="tok-comment"># Verify Myanmar OpenType shaping on your system</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+myanmar-check</span>
+
+<span class="tok-comment"># Inspect resolved config or validate config syntax</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+show-config</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+validate-config</span>
+
+<span class="tok-comment"># Override any config key or run a command directly</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">--theme=catppuccin-mocha</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">--working-directory</span> ~/projects <span class="tok-flag">-e</span> htop</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Configuration & Built-in Themes -->
+    <section id="config" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Configuration</div>
+        <h2 class="section-title">Plain text. Live hot-reload.</h2>
+        <p class="section-desc">
+          Edit <code>~/.config/ocean/config</code> in your favorite editor — Ocean watches the file and applies font,
+          theme, padding, opacity, and keybinding updates immediately (or press <kbd>Ctrl+Shift+,</kbd>).
+        </p>
+
+        <div class="config-layout">
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>~/.config/ocean/config</span>
+              <button type="button" class="copy-btn" data-copy-target="cfg-sample">Copy Config</button>
+            </div>
+            <pre id="cfg-sample"><span class="tok-comment"># Typography &amp; Myanmar Fonts</span>
+<span class="tok-key">font-family</span>         = <span class="tok-val">Cascadia Code NF</span>
+<span class="tok-key">font-family-myanmar</span> = <span class="tok-val">Padauk</span>
+<span class="tok-key">font-size</span>           = <span class="tok-val">13.5</span>
+<span class="tok-key">myanmar-font-scale</span>  = <span class="tok-val">0.96</span>
+<span class="tok-key">myanmar-zawgyi</span>      = <span class="tok-val">off</span>
+
+<span class="tok-comment"># Theme &amp; Window Appearance</span>
+<span class="tok-key">theme</span>                  = <span class="tok-val">ocean-dark</span>
+<span class="tok-key">background-opacity</span>     = <span class="tok-val">0.96</span>
+<span class="tok-key">cursor-style</span>           = <span class="tok-val">block</span>
+<span class="tok-key">window-show-tab-bar</span>    = <span class="tok-val">auto</span>
+<span class="tok-key">window-show-status-bar</span> = <span class="tok-val">true</span>
+<span class="tok-key">window-padding-x</span>       = <span class="tok-val">10,10</span>
+<span class="tok-key">window-padding-y</span>       = <span class="tok-val">8,8</span>
+
+<span class="tok-comment"># Keybindings (Ghostty syntax)</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+p=toggle_context_menu</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+d=new_split:right</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+e=new_split:down</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">alt+shift+h=goto_split:left</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">alt+shift+l=goto_split:right</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+m=toggle_myanmar_zawgyi</span></pre>
+          </div>
+
+          <div class="themes-box">
+            <h3>10 Curated Built-In Themes</h3>
+            <p>
+              Switch live via <kbd>Ctrl+Shift+P</kbd> → <strong>Switch Theme</strong> (press <kbd>t</kbd>) or set
+              <code>theme = &lt;id&gt;</code> in config.
+            </p>
+
+            <div class="theme-group-label">Dark Themes (5)</div>
+            <div class="swatch-grid">
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#0d131a;--accent:#58d1eb"></span>
+                <span>ocean-dark</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#1a1b26;--accent:#7aa2f7"></span>
+                <span>tokyo-night</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#1e1e2e;--accent:#cba6f7"></span>
+                <span>catppuccin-mocha</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#282828;--accent:#fabd2f"></span>
+                <span>gruvbox-dark</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#2e3440;--accent:#88c0d0"></span>
+                <span>nord</span>
+              </div>
+            </div>
+
+            <div class="theme-group-label">Light Themes (5)</div>
+            <div class="swatch-grid">
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#f7f9fc;--accent:#0969da"></span>
+                <span>ocean-light</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#e1e2e7;--accent:#2e7de9"></span>
+                <span>tokyo-night-light</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#eff1f5;--accent:#8839ef"></span>
+                <span>catppuccin-latte</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#fbf1c7;--accent:#b57614"></span>
+                <span>gruvbox-light</span>
+              </div>
+              <div class="swatch-pill">
+                <span class="swatch-dot" style="background:#fdf6e3;--accent:#268bd2"></span>
+                <span>solarized-light</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Default Keyboard Shortcuts -->
+    <section id="shortcuts" class="section-band">
+      <div class="section-inner">
+        <div class="section-eyebrow">Keyboard Reference</div>
+        <h2 class="section-title">Default keyboard shortcuts.</h2>
+        <p class="section-desc">
+          Every shortcut is customizable in <code>~/.config/ocean/config</code> using <code>keybind = mods+key=action</code>.
+        </p>
+
+        <div class="shortcuts-wrap">
+          <table class="shortcuts-table">
+            <thead>
+              <tr>
+                <th>Shortcut</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> / <kbd>Shift</kbd> + <kbd>F10</kbd></td>
+                <td>Open / close Context Menu at cursor (navigate with <kbd>j</kbd>/<kbd>k</kbd>, <kbd>t</kbd> themes, <kbd>1</kbd>–<kbd>9</kbd>)</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td>
+                <td>Show / hide bottom Neovim-style shortcut status bar</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>?</kbd></td>
+                <td>Toggle in-app Help &amp; Documentation dialog (<kbd>1</kbd>–<kbd>5</kbd> sections, <kbd>j</kbd>/<kbd>k</kbd> scroll)</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td>
+                <td>Split active pane right / split active pane down</td>
+              </tr>
+              <tr>
+                <td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>/<kbd>J</kbd>/<kbd>K</kbd>/<kbd>L</kbd> (or Arrows)</td>
+                <td>Move focus between split panes</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>H</kbd>/<kbd>J</kbd>/<kbd>K</kbd>/<kbd>L</kbd> (or Arrows)</td>
+                <td>Resize active split pane</td>
+              </tr>
+              <tr>
+                <td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>=</kbd></td>
+                <td>Equalize all split pane sizes</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></td>
+                <td>New tab / close active split or tab</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd></td>
+                <td>Switch to next / previous tab</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd></td>
+                <td>Copy selection to clipboard / paste from clipboard</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>=</kbd> / <kbd>Ctrl</kbd> + <kbd>-</kbd> / <kbd>Ctrl</kbd> + <kbd>0</kbd></td>
+                <td>Increase / decrease / reset font size</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>,</kbd> (or <kbd>R</kbd>)</td>
+                <td>Live reload configuration file</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td>
+                <td>Toggle legacy Zawgyi-One auto-conversion mode</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + Left Click / <kbd>F11</kbd></td>
+                <td>Open URL under cursor / toggle fullscreen</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="brand">
+        <img src="./assets/ocean.svg" alt="Ocean Logo" class="brand-logo" />
+        <span>Ocean Terminal — Released under the MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/moekyawsoe/ocean" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/moekyawsoe/ocean/releases" target="_blank" rel="noopener noreferrer">Releases (.deb / .rpm)</a>
+        <a href="https://github.com/moekyawsoe/ocean/blob/master/config.example" target="_blank" rel="noopener noreferrer">config.example</a>
+        <a href="https://github.com/moekyawsoe/ocean/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    document.querySelectorAll("[data-copy-target]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var el = document.getElementById(btn.getAttribute("data-copy-target"));
+        if (!el || !navigator.clipboard) return;
+        var original = btn.textContent;
+        navigator.clipboard.writeText(el.innerText.trim()).then(function () {
+          btn.textContent = "Copied!";
+          setTimeout(function () {
+            btn.textContent = original;
+          }, 1400);
+        });
+      });
+    });
+  </script>
+</body>
+</html>

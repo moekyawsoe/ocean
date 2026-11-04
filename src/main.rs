@@ -31,6 +31,7 @@ fn main() {
     let mut working_dir: Option<PathBuf> = None;
     let mut exec_cmd: Option<(String, Vec<String>)> = None;
     let mut screenshot_out: Option<PathBuf> = None;
+    let mut screenshot_preset: Option<String> = None;
     let mut plus_action: Option<String> = None;
     let mut force_flag = false;
     let mut cli_overrides: Vec<(String, String)> = Vec::new();
@@ -76,6 +77,13 @@ fn main() {
                     continue;
                 }
             }
+            "--screenshot-preset" => {
+                if i + 1 < args.len() {
+                    screenshot_preset = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
             "--force" => {
                 force_flag = true;
             }
@@ -91,6 +99,8 @@ fn main() {
                         working_dir = Some(PathBuf::from(v));
                     } else if k == "screenshot" {
                         screenshot_out = Some(PathBuf::from(v));
+                    } else if k == "screenshot-preset" {
+                        screenshot_preset = Some(v.to_string());
                     } else {
                         cli_overrides.push((k.to_string(), v.to_string()));
                     }
@@ -120,7 +130,12 @@ fn main() {
     }
 
     if let Some(out_png) = screenshot_out {
-        if let Err(err) = run_screenshot(&out_png, &config, exec_cmd.as_ref()) {
+        if let Err(err) = run_screenshot(
+            &out_png,
+            &config,
+            exec_cmd.as_ref(),
+            screenshot_preset.as_deref(),
+        ) {
             eprintln!("ocean screenshot failed: {err}");
             std::process::exit(1);
         }
@@ -277,10 +292,143 @@ fn run_screenshot(
     out_path: &Path,
     config: &Config,
     exec_cmd: Option<&(String, Vec<String>)>,
+    preset: Option<&str>,
 ) -> Result<(), String> {
+    if let Some(parent) = out_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        let _ = fs::create_dir_all(parent);
+    }
+
     let mut font_sys = FontSystem::new(config, 1.0);
     let cols = config.window_width as usize;
     let rows = config.window_height as usize;
+
+    if preset == Some("splits") {
+        let tabs = [
+            renderer::TabTitle {
+                title: "ocean — ~/BDATA/ocean",
+                active: true,
+            },
+            renderer::TabTitle {
+                title: "nvim ~/.config/ocean/config",
+                active: false,
+            },
+        ];
+        let tab_h = RenderEngine::tab_bar_height(config, &font_sys, tabs.len());
+        let status_h = RenderEngine::status_bar_height(config, &font_sys, 1.0);
+        let win_w = (cols as f32 * font_sys.metrics.cell_width
+            + (config.window_padding_x.0 + config.window_padding_x.1) as f32)
+            .round() as u32;
+        let win_h = (rows as f32 * font_sys.metrics.cell_height
+            + (config.window_padding_y.0 + config.window_padding_y.1) as f32
+            + tab_h
+            + status_h)
+            .round() as u32;
+
+        let root = split::SplitNode::Split {
+            axis: split::SplitAxis::Horizontal,
+            ratio: 0.54,
+            first: Box::new(split::SplitNode::Leaf(1)),
+            second: Box::new(split::SplitNode::Leaf(2)),
+        };
+        let (layouts, dividers) =
+            split::compute_split_layout(&root, config, &font_sys, win_w, win_h, 1.0, tab_h, status_h);
+        let l1 = layouts[0];
+        let l2 = layouts[1];
+
+        let left_ansi = concat!(
+            "\x1b[1;32mocean@linux\x1b[0m:\x1b[1;34m~/BDATA/ocean\x1b[0m$ cargo build --release\r\n",
+            "   \x1b[1;32mCompiling\x1b[0m ocean v1.0.0 (/home/mks/BDATA/ocean)\r\n",
+            "    \x1b[1;32mFinished\x1b[0m `release` profile [optimized] in 2.41s\r\n\r\n",
+            "\x1b[1;32mocean@linux\x1b[0m:\x1b[1;34m~/BDATA/ocean\x1b[0m$ ocean +myanmar-check\r\n",
+            "\x1b[1;36mOcean Myanmar/Burmese Shaping Diagnostic\x1b[0m\r\n",
+            "  Primary font : Cascadia Code NF\r\n",
+            "  Myanmar font : Padauk\r\n",
+            "  [\x1b[1;32mPASS\x1b[0m] Greeting (Kinzi + Tall AA) -> မင်္ဂလာပါ\r\n",
+            "  [\x1b[1;32mPASS\x1b[0m] Stacked Pali Consonants    -> ဗုဒ္ဓဘာသာ နှင့် ဣန္ဒြေ\r\n",
+            "  [\x1b[1;32mPASS\x1b[0m] Upper+Lower Marks          -> ရန်ကုန်မြို့ • မန္တလေးမြို့\r\n",
+            "  [\x1b[1;32mPASS\x1b[0m] Myanmar Digits             -> ၀၁၂၃၄၅၆၇၈၉\r\n\r\n",
+            "\x1b[1;32mocean@linux\x1b[0m:\x1b[1;34m~/BDATA/ocean\x1b[0m$ git tag v1.0.0\r\n",
+            "\x1b[1;32mocean@linux\x1b[0m:\x1b[1;34m~/BDATA/ocean\x1b[0m$ "
+        );
+        let right_ansi = concat!(
+            "\x1b[1;35m╭─ Active Split Pane (Alt+Shift+H/L) ───────╮\x1b[0m\r\n",
+            "\x1b[1;35m│\x1b[0m  • Keyboard Splits : \x1b[36mCtrl+Shift+D / E\x1b[0m     \x1b[1;35m│\x1b[0m\r\n",
+            "\x1b[1;35m│\x1b[0m  • Context Menu    : \x1b[36mCtrl+Shift+P\x1b[0m         \x1b[1;35m│\x1b[0m\r\n",
+            "\x1b[1;35m│\x1b[0m  • Reload Config   : \x1b[36mCtrl+Shift+,\x1b[0m         \x1b[1;35m│\x1b[0m\r\n",
+            "\x1b[1;35m╰───────────────────────────────────────────╯\x1b[0m\r\n\r\n",
+            "\x1b[1;34m$\x1b[0m ocean +list-themes\r\n",
+            "  * tokyo-night        (dark)  — Tokyo Night\r\n",
+            "    ocean-dark         (dark)  — Ocean Dark\r\n",
+            "    catppuccin-mocha   (dark)  — Catppuccin\r\n",
+            "    gruvbox-dark       (dark)  — Gruvbox\r\n",
+            "    nord               (dark)  — Nord\r\n",
+            "    ocean-light        (light) — Ocean Light\r\n"
+        );
+
+        let snap1 = snapshot_from_bytes(left_ansi.as_bytes(), config, l1.cols as usize, l1.rows as usize);
+        let snap2 = snapshot_from_bytes(right_ansi.as_bytes(), config, l2.cols as usize, l2.rows as usize);
+
+        let panes = [
+            renderer::PaneScene {
+                snapshot: &snap1,
+                layout: l1,
+                is_active: true,
+                ime_preedit: None,
+            },
+            renderer::PaneScene {
+                snapshot: &snap2,
+                layout: l2,
+                is_active: false,
+                ime_preedit: None,
+            },
+        ];
+
+        let mut ctx_menu = menu::ContextMenu::build(
+            (win_w as f32 * 0.34).round(),
+            (win_h as f32 * 0.24).round(),
+            false,
+            2,
+            config.window_show_status_bar,
+            &config.keybinds,
+        );
+        if let Some(theme_idx) = ctx_menu
+            .entries
+            .iter()
+            .position(|e| matches!(e, menu::MenuEntry::ThemeSubmenu { .. }))
+        {
+            ctx_menu.hovered = Some(theme_idx);
+            ctx_menu.submenu_open = true;
+            ctx_menu.sub_hovered = Some(2);
+        }
+
+        let mut engine = RenderEngine::new();
+        let (atlas, instances) = engine.build_scene(
+            config,
+            &mut font_sys,
+            &panes,
+            &dividers,
+            win_w,
+            win_h,
+            1.0,
+            &tabs,
+            Some(&ctx_menu),
+            None,
+            None,
+            true,
+            true,
+        );
+
+        return save_scene_png(
+            out_path,
+            atlas,
+            instances,
+            win_w,
+            win_h,
+            config.colors.background,
+        );
+    }
 
     let payload: Vec<u8> = if let Some((prog, args)) = exec_cmd {
         let out = Command::new(prog)

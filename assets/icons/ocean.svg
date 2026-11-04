@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <!-- Pure white rounded-square icon background with subtle sky-blue frame -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="#FFFFFF" stroke="#DCEEFB" stroke-width="5"/>
+
+  <!-- Simple geometric terminal chevron '>' in sky blue -->
+  <path
+    d="M 116 184 L 192 256 L 116 328"
+    stroke="#0284C7"
+    stroke-width="38"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Upper minimal ocean wave in bright sky blue -->
+  <path
+    d="M 248 220 C 273 190, 297 190, 322 220 C 347 250, 371 250, 396 220"
+    stroke="#0EA5E9"
+    stroke-width="36"
+    stroke-linecap="round"
+  />
+
+  <!-- Lower minimal ocean wave in soft sky blue -->
+  <path
+    d="M 248 292 C 273 262, 297 262, 322 292 C 347 322, 371 322, 396 292"
+    stroke="#38BDF8"
+    stroke-width="36"
+    stroke-linecap="round"
+  />
+</svg>

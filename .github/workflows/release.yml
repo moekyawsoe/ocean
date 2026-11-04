@@ -1,0 +1,123 @@
+name: Release Packages (.deb & .rpm)
+
+on:
+  push:
+    tags:
+      - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to build (e.g. v1.0.0)"
+        required: false
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux-packages:
+    name: Build Linux .deb & .rpm (x86_64)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release version from git tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="${{ inputs.version || 'v0.1.0' }}"
+          fi
+          CLEAN_VERSION="${TAG_NAME#v}"
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${CLEAN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building Ocean Terminal ${TAG_NAME} (crate version ${CLEAN_VERSION})"
+
+      - name: Sync Cargo.toml version with git tag
+        run: |
+          sed -i '0,/^version = ".*"/s//version = "${{ steps.meta.outputs.version }}"/' Cargo.toml
+          grep '^version = ' Cargo.toml
+
+      - name: Install system build & packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            dpkg-dev \
+            rpm \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build optimized release binary
+        run: |
+          cargo build --release
+          ./target/release/ocean --version
+
+      - name: Package .deb, .rpm, and portable .tar.gz
+        run: |
+          chmod +x ./packaging/build-packages.sh
+          ./packaging/build-packages.sh "${{ steps.meta.outputs.tag }}"
+
+      - name: Verify generated .deb and .rpm metadata & contents
+        run: |
+          echo "=== Debian (.deb) Info ==="
+          dpkg-deb --info dist/ocean_amd64.deb
+          dpkg-deb --contents dist/ocean_amd64.deb
+          echo "=== RPM (.rpm) Info ==="
+          rpm -qip dist/ocean.x86_64.rpm
+          rpm -qlp dist/ocean.x86_64.rpm
+          cat dist/SHA256SUMS
+
+      - name: Upload workflow build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocean-${{ steps.meta.outputs.tag }}-linux-packages
+          path: dist/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Ocean Terminal ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          body: |
+            ### Quick Install (Linux x86_64)
+
+            **Debian / Ubuntu / Linux Mint / Pop!_OS (`.deb`):**
+            ```bash
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/ocean_${{ steps.meta.outputs.version }}_amd64.deb
+            sudo apt install ./ocean_${{ steps.meta.outputs.version }}_amd64.deb
+            ```
+
+            **Fedora / RHEL / Rocky / openSUSE (`.rpm`):**
+            ```bash
+            sudo dnf install https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/ocean-${{ steps.meta.outputs.version }}-1.x86_64.rpm
+            ```
+
+            **Verify Checksums:**
+            See attached `SHA256SUMS`.

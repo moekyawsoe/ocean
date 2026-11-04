@@ -1,6 +1,61 @@
+<div align="center">
+
+<img src="./assets/icons/ocean.svg" alt="Ocean Terminal Logo" width="128" height="128" />
+
 # Ocean Terminal (`ocean`)
 
-A clean, minimal, lightweight, GPU-accelerated terminal emulator written in **Rust** with **full Myanmar / Burmese (`မြန်မာဘာသာ`) OpenType shaping support** and **Ghostty-style configuration**.
+**Clean, minimal, ultra-lightweight GPU-accelerated terminal emulator written in Rust with full Myanmar / Burmese (`မြန်မာဘာသာ`) OpenType shaping support and Ghostty-style configuration.**
+
+[![Release](https://img.shields.io/github/v/release/moekyawsoe/ocean?include_prereleases&style=flat-square&color=0284c7)](https://github.com/moekyawsoe/ocean/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-0ea5e9.svg?style=flat-square)](./LICENSE)
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux%20(Wayland%20%2F%20X11)-38bdf8.svg?style=flat-square)](https://github.com/moekyawsoe/ocean)
+
+[Landing Page Website](./website/index.html) • [Download (.deb / .rpm)](#download--installation) • [Highlights](#highlights) • [CLI Actions](#ghostty-style-cli-actions) • [Config](#configuration-configoceanconfig) • [Shortcuts](#default-shortcuts)
+
+</div>
+
+---
+
+## Screenshots
+
+### 1. Ocean Dark Theme & Native Myanmar (`mym2`) OpenType Shaping
+![Ocean Terminal - Myanmar Shaping & Ocean Dark Theme](./assets/screenshots/ocean-myanmar-dark.png)
+
+### 2. Side-by-Side Split Panes, Tabs & Vim-Navigable Theme Context Menu
+![Ocean Terminal - Split Panes & Context Menu](./assets/screenshots/ocean-splits-menu.png)
+
+### 3. Ocean Light Theme (High Contrast)
+![Ocean Terminal - Ocean Light Theme](./assets/screenshots/ocean-light.png)
+
+---
+
+## Download & Installation
+
+Pre-built `.deb`, `.rpm`, and portable `.tar.gz` packages are built automatically by GitHub Actions on every tag push (e.g. `v1.0.0`).
+
+### Debian / Ubuntu / Linux Mint / Pop!_OS (`.deb`)
+
+```bash
+# Download and install the latest .deb package
+curl -LO https://github.com/moekyawsoe/ocean/releases/latest/download/ocean_amd64.deb
+sudo apt install ./ocean_amd64.deb
+```
+
+### Fedora / RHEL / Rocky Linux / openSUSE (`.rpm`)
+
+```bash
+# Install directly via DNF
+sudo dnf install https://github.com/moekyawsoe/ocean/releases/latest/download/ocean.x86_64.rpm
+```
+
+### Build from Source (Cargo)
+
+```bash
+git clone https://github.com/moekyawsoe/ocean.git
+cd ocean
+cargo build --release
+./target/release/ocean
+```
 
 ---
 
@@ -22,37 +77,30 @@ A clean, minimal, lightweight, GPU-accelerated terminal emulator written in **Ru
 
 ---
 
-## Build & Run
-
-```bash
-cargo build --release
-./target/release/ocean
-```
-
-### Ghostty-Style CLI Actions
+## Ghostty-Style CLI Actions
 
 ```bash
 # Generate starter Ghostty-style config at ~/.config/ocean/config
-./target/release/ocean +init-config
+ocean +init-config
 
 # List discovered Monospace & Myanmar/Burmese system fonts
-./target/release/ocean +list-fonts
+ocean +list-fonts
 
-# List built-in color themes
-./target/release/ocean +list-themes
+# List built-in color themes (5 Dark + 5 Light)
+ocean +list-themes
 
 # Verify Myanmar/Burmese OpenType shaping on your system
-./target/release/ocean +myanmar-check
+ocean +myanmar-check
 
 # Show active resolved configuration
-./target/release/ocean +show-config
+ocean +show-config
 
-# Validate config file
-./target/release/ocean +validate-config
+# Validate config file syntax
+ocean +validate-config
 
 # Launch with a specific theme or command
-./target/release/ocean --theme=catppuccin-mocha
-./target/release/ocean -e htop
+ocean --theme=catppuccin-mocha
+ocean -e htop
 ```
 
 ---
@@ -69,7 +117,7 @@ font-size = 13.5
 myanmar-font-scale = 0.96
 myanmar-zawgyi = off
 
-# Theme & Appearance
+# Theme & Appearance (10 curated themes: ocean-dark, tokyo-night, catppuccin-mocha, nord, ocean-light, etc.)
 theme = ocean-dark
 background-opacity = 0.96
 cursor-style = block

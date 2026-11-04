@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Clean, lightweight, GPU-accelerated terminal emulator with full Myanmar/Burmese support and Ghostty-style config"
 license = "MIT"
+homepage = "https://github.com/moekyawsoe/ocean"
+repository = "https://github.com/moekyawsoe/ocean"
+readme = "README.md"
 
 [dependencies]
 alacritty_terminal = { version = "0.26", default-features = false }
@@ -27,3 +30,46 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+[package.metadata.deb]
+maintainer = "Moe Kyaw Soe <https://github.com/moekyawsoe/ocean>"
+copyright = "2026, Moe Kyaw Soe"
+license-file = ["README.md", "0"]
+depends = "$auto, libwayland-client0 | libx11-6, libegl1 | libgl1, libxkbcommon0"
+recommends = "fonts-padauk | fonts-noto-core"
+section = "x11"
+priority = "optional"
+assets = [
+    ["target/release/ocean", "usr/bin/", "755"],
+    ["packaging/linux/ocean.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/ocean.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["assets/icons/ocean.svg", "usr/share/icons/hicolor/scalable/apps/ocean.svg", "644"],
+    ["assets/icons/16x16/ocean.png", "usr/share/icons/hicolor/16x16/apps/ocean.png", "644"],
+    ["assets/icons/32x32/ocean.png", "usr/share/icons/hicolor/32x32/apps/ocean.png", "644"],
+    ["assets/icons/48x48/ocean.png", "usr/share/icons/hicolor/48x48/apps/ocean.png", "644"],
+    ["assets/icons/64x64/ocean.png", "usr/share/icons/hicolor/64x64/apps/ocean.png", "644"],
+    ["assets/icons/128x128/ocean.png", "usr/share/icons/hicolor/128x128/apps/ocean.png", "644"],
+    ["assets/icons/256x256/ocean.png", "usr/share/icons/hicolor/256x256/apps/ocean.png", "644"],
+    ["assets/icons/512x512/ocean.png", "usr/share/icons/hicolor/512x512/apps/ocean.png", "644"],
+    ["assets/icons/256x256/ocean.png", "usr/share/pixmaps/ocean.png", "644"],
+    ["config.example", "usr/share/doc/ocean/config.example", "644"],
+    ["README.md", "usr/share/doc/ocean/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/ocean", dest = "/usr/bin/ocean", mode = "755" },
+    { source = "packaging/linux/ocean.desktop", dest = "/usr/share/applications/ocean.desktop", mode = "644" },
+    { source = "packaging/linux/ocean.metainfo.xml", dest = "/usr/share/metainfo/ocean.metainfo.xml", mode = "644" },
+    { source = "assets/icons/ocean.svg", dest = "/usr/share/icons/hicolor/scalable/apps/ocean.svg", mode = "644" },
+    { source = "assets/icons/16x16/ocean.png", dest = "/usr/share/icons/hicolor/16x16/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/32x32/ocean.png", dest = "/usr/share/icons/hicolor/32x32/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/48x48/ocean.png", dest = "/usr/share/icons/hicolor/48x48/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/64x64/ocean.png", dest = "/usr/share/icons/hicolor/64x64/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/128x128/ocean.png", dest = "/usr/share/icons/hicolor/128x128/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/256x256/ocean.png", dest = "/usr/share/icons/hicolor/256x256/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/512x512/ocean.png", dest = "/usr/share/icons/hicolor/512x512/apps/ocean.png", mode = "644" },
+    { source = "assets/icons/256x256/ocean.png", dest = "/usr/share/pixmaps/ocean.png", mode = "644" },
+    { source = "config.example", dest = "/usr/share/doc/ocean/config.example", mode = "644", doc = true },
+    { source = "README.md", dest = "/usr/share/doc/ocean/README.md", mode = "644", doc = true },
+]

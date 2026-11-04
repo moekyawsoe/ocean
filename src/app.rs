@@ -25,7 +25,11 @@ use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
-use winit::window::{CursorIcon, Fullscreen, ResizeDirection, Window, WindowId};
+#[cfg(target_os = "linux")]
+use winit::platform::wayland::WindowAttributesExtWayland;
+#[cfg(target_os = "linux")]
+use winit::platform::x11::WindowAttributesExtX11;
+use winit::window::{CursorIcon, Fullscreen, Icon, ResizeDirection, Window, WindowId};
 
 use crate::config::keybind::{Action, SplitDirection, SplitFocusTarget, match_keybind};
 use crate::config::theme::ThemePalette;
@@ -218,9 +222,14 @@ impl OceanApp {
         let decorations = self.config.effective_decorations();
         let win_attrs = Window::default_attributes()
             .with_title(title)
+            .with_window_icon(load_window_icon())
             .with_inner_size(LogicalSize::new(init_w, init_h))
             .with_decorations(decorations)
             .with_transparent(transparent);
+        #[cfg(target_os = "linux")]
+        let win_attrs = WindowAttributesExtWayland::with_name(win_attrs, "ocean", "ocean");
+        #[cfg(target_os = "linux")]
+        let win_attrs = WindowAttributesExtX11::with_name(win_attrs, "ocean", "ocean");
 
         let template = ConfigTemplateBuilder::new()
             .with_alpha_size(8)
@@ -2287,3 +2296,26 @@ impl ApplicationHandler<AppEvent> for OceanApp {
 
 #[allow(dead_code)]
 fn _assert_cstr(_: CString) {}
+
+const APP_ICON_PNG: &[u8] = include_bytes!("../assets/icons/64x64/ocean.png");
+
+fn load_window_icon() -> Option<Icon> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(APP_ICON_PNG));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let bytes = &buf[..info.buffer_size()];
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => bytes.to_vec(),
+        png::ColorType::Rgb => {
+            let mut out = Vec::with_capacity((info.width * info.height * 4) as usize);
+            for px in bytes.chunks_exact(3) {
+                out.extend_from_slice(&[px[0], px[1], px[2], 255]);
+            }
+            out
+        }
+        _ => return None,
+    };
+    Icon::from_rgba(rgba, info.width, info.height).ok()
+}

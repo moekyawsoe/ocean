@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ocean.desktop</id>
+  <name>Ocean Terminal</name>
+  <summary>Clean, lightweight GPU-accelerated terminal emulator with full Myanmar/Burmese support</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.moekyawsoe">
+    <name>Moe Kyaw Soe</name>
+  </developer>
+  <launchable type="desktop-id">ocean.desktop</launchable>
+  <description>
+    <p>
+      Ocean is a clean, minimal, ultra-lightweight GPU-accelerated terminal emulator written in Rust
+      with full Myanmar / Burmese OpenType (mym2 / mymr) shaping support, Wayland and X11 IME preedit,
+      keyboard-first split panes, a Neovim-style status bar, and Ghostty-compatible configuration.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/moekyawsoe/ocean</url>
+  <url type="bugtracker">https://github.com/moekyawsoe/ocean/issues</url>
+  <provides>
+    <binary>ocean</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>
