@@ -1,0 +1,29 @@
+[package]
+name = "ocean"
+version = "0.1.0"
+edition = "2024"
+description = "Clean, lightweight, GPU-accelerated terminal emulator with full Myanmar/Burmese support and Ghostty-style config"
+license = "MIT"
+
+[dependencies]
+alacritty_terminal = { version = "0.26", default-features = false }
+arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
+fontdb = "0.24"
+glow = "0.18"
+glutin = "0.32"
+glutin-winit = "0.5"
+log = "0.4"
+png = "0.17"
+raw-window-handle = "0.6"
+rustc-hash = "2.1"
+rustybuzz = "0.20"
+swash = "0.2"
+unicode-width = "0.2"
+winit = "0.30"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
