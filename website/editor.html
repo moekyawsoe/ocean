@@ -138,6 +138,7 @@
               <tbody>
                 <tr><td><code>ocean edit [PATH]</code></td><td>Open a file, or a folder as the workspace. No path opens the current directory.</td></tr>
                 <tr><td><code>edit [PATH]</code></td><td>Standalone launcher installed as an <code>ocean</code> symlink by the <code>.deb</code> and <code>.rpm</code> packages.</td></tr>
+                <tr><td><code>edit [PATH]</code> inside an Ocean shell</td><td>Switches the <strong>current window</strong> into Pure Editor mode via local IPC. No new window or tab is created.</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle Pure Editor mode (Mode C) from a running session.</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B): editor on top, terminal on the bottom.</td></tr>
                 <tr><td>Context Menu</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Toggle Code Editor</strong> (mnemonic <kbd>i</kbd>).</td></tr>
@@ -164,8 +165,10 @@
           </div>
 
           <div class="docs-note">
-            When Ocean starts in editor mode, typing <code>ocean edit</code> or <code>edit</code> with no argument opens
-            the current working directory as the workspace.
+            <strong>No second window from inside Ocean.</strong> Each shell inherits an <code>OCEAN_SOCKET</code> and
+            <code>OCEAN_PANE_ID</code>; running <code>edit</code> sends a request to the owning window, which switches
+            that pane's window to the editor and opens the requested file or folder. From outside Ocean it reuses the
+            most recently active Ocean window if one is running; otherwise it starts a normal editor window.
           </div>
         </section>
 
@@ -307,7 +310,8 @@
             <li><strong>Breadcrumbs</strong> below the tabs show the active file path relative to the workspace root.</li>
             <li><strong>Activity bar</strong> on the left switches between <strong>Explorer</strong> and <strong>Problems</strong>; the magnifier opens the command palette.</li>
             <li><strong>Problems panel</strong> lists diagnostics across open documents; click an entry to open the file and jump to the line.</li>
-            <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state.</li>
+            <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state. It renders at 80% of the terminal font size by default.</li>
+            <li><strong>Unsaved-work dialog</strong> appears before closing a dirty document, closing the last tab/pane, quitting, or pressing the window close button. Choices are <strong>Save</strong> / <strong>Discard</strong> / <strong>Cancel</strong> (or <strong>Save All</strong> / <strong>Discard All</strong> / <strong>Cancel</strong>); <kbd>Esc</kbd> always cancels. <code>:q!</code> is the explicit force-discard.</li>
             <li><strong>Code surface</strong> adds a full-width current-line highlight, indent guides, matching-bracket highlights, and cluster-aware selection.</li>
             <li><strong>Command palette</strong> dims the editor behind a wider modal panel.</li>
             <li><strong>Pure Editor</strong> hides the terminal tab bar and global shortcut bar, leaving one top tab row and one bottom status bar.</li>

@@ -1,8 +1,10 @@
 mod app;
 mod config;
+mod confirm;
 pub mod editor;
 mod font;
 mod help;
+mod ipc;
 mod menu;
 mod renderer;
 mod split;
@@ -216,6 +218,12 @@ fn main() {
 
     if let Some(act) = cli.plus_action {
         run_plus_action(&act, &config, cli.force_flag);
+        return;
+    }
+
+    // `edit` inside an Ocean shell should reuse the current window and switch
+    // that pane's window into editor mode instead of spawning a new window.
+    if cli.initial_editor_mode && crate::ipc::try_send_edit_request(cli.editor_file.as_deref()) {
         return;
     }
 
@@ -657,6 +665,7 @@ fn run_screenshot(
             None,
             None,
             false,
+            None,
         );
 
         return save_scene_png(
@@ -736,6 +745,7 @@ fn run_screenshot(
         None,
         None,
         false,
+        None,
     );
 
     save_scene_png(

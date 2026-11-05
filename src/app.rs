@@ -34,6 +34,7 @@ use winit::window::{CursorIcon, Fullscreen, Icon, ResizeDirection, Window, Windo
 use crate::config::keybind::{Action, SplitDirection, SplitFocusTarget, match_keybind};
 use crate::config::theme::ThemePalette;
 use crate::config::{Config, ZawgyiMode};
+use crate::confirm::{ConfirmChoice, ConfirmDialog, ConfirmLayout};
 use crate::font::FontSystem;
 use crate::help::{HelpClickOutcome, HelpDialog, HelpKeyOutcome};
 use crate::menu::{ContextMenu, MenuClickOutcome, MenuKeyOutcome};
@@ -122,6 +123,7 @@ pub struct OceanApp {
     pub proxy: EventLoopProxy<AppEvent>,
     pub wakeup_queued: Arc<AtomicBool>,
     pub editor: crate::editor::EditorWorkspace,
+    ipc_socket: Option<PathBuf>,
 
     gl_state: Option<GlState>,
     font_sys: Option<FontSystem>,
@@ -136,6 +138,7 @@ pub struct OceanApp {
     context_menu: Option<ContextMenu>,
     theme_before_preview: Option<String>,
     help_dialog: Option<HelpDialog>,
+    confirm_dialog: Option<ConfirmDialog>,
     available_update: Option<crate::update::UpdateInfo>,
     status_hover: StatusBarHover,
     dragging_divider: Option<DividerDragState>,
@@ -215,6 +218,8 @@ impl OceanApp {
             editor.open_folder(".");
         }
 
+        let ipc_socket = crate::ipc::start_listener(proxy.clone()).ok();
+
         Self {
             config,
             base_font_size,
@@ -222,6 +227,7 @@ impl OceanApp {
             proxy,
             wakeup_queued: Arc::new(AtomicBool::new(false)),
             editor,
+            ipc_socket,
             gl_state: None,
             font_sys: None,
             render_engine: RenderEngine::new(),
@@ -233,6 +239,7 @@ impl OceanApp {
             context_menu: None,
             theme_before_preview: None,
             help_dialog: None,
+            confirm_dialog: None,
             available_update: None,
             status_hover: StatusBarHover::default(),
             dragging_divider: None,
@@ -432,6 +439,7 @@ impl OceanApp {
             rows,
             font_sys.metrics.cell_width as u16,
             font_sys.metrics.cell_height as u16,
+            self.ipc_socket.as_deref(),
             self.proxy.clone(),
             Arc::clone(&self.wakeup_queued),
         )?;
@@ -479,6 +487,7 @@ impl OceanApp {
             rows,
             font_sys.metrics.cell_width as u16,
             font_sys.metrics.cell_height as u16,
+            self.ipc_socket.as_deref(),
             self.proxy.clone(),
             Arc::clone(&self.wakeup_queued),
         )?;
@@ -603,6 +612,7 @@ impl OceanApp {
             rows,
             font_sys.metrics.cell_width as u16,
             font_sys.metrics.cell_height as u16,
+            self.ipc_socket.as_deref(),
             self.proxy.clone(),
             Arc::clone(&self.wakeup_queued),
         )?;
@@ -748,6 +758,12 @@ impl OceanApp {
             return;
         };
 
+        if self.tabs.len() <= 1 && self.tabs[tab_idx].panes.len() <= 1 && self.editor.has_unsaved()
+        {
+            self.request_exit(event_loop);
+            return;
+        }
+
         self.close_context_menu();
         self.dragging_divider = None;
         if self.selecting_pane_id == Some(pane_id) {
@@ -793,6 +809,10 @@ impl OceanApp {
 
     fn close_tab_at(&mut self, tab_idx: usize, event_loop: &ActiveEventLoop) {
         if tab_idx >= self.tabs.len() {
+            return;
+        }
+        if self.tabs.len() <= 1 && self.editor.has_unsaved() {
+            self.request_exit(event_loop);
             return;
         }
         self.close_context_menu();
@@ -917,8 +937,8 @@ impl OceanApp {
         StatusBarGeometry::compute(
             &self.config,
             &ctx,
-            font_sys.metrics.cell_width,
-            font_sys.metrics.cell_height,
+            font_sys.metrics.cell_width * crate::statusbar::STATUS_BAR_TEXT_SCALE,
+            font_sys.metrics.cell_height * crate::statusbar::STATUS_BAR_TEXT_SCALE,
             phys.width,
             phys.height,
             sf,
@@ -1377,7 +1397,7 @@ impl OceanApp {
                 self.open_config_in_editor();
             }
             Action::Quit => {
-                event_loop.exit();
+                self.request_exit(event_loop);
             }
             Action::ToggleEditor => {
                 self.editor.mode = match self.editor.mode {
@@ -1440,6 +1460,135 @@ impl OceanApp {
     fn reset_cursor_blink(&mut self) {
         self.cursor_blink_on = true;
         self.last_blink_toggle = Instant::now();
+    }
+
+    fn current_confirm_layout(&self) -> Option<ConfirmLayout> {
+        let gl_state = self.gl_state.as_ref()?;
+        let font_sys = self.font_sys.as_ref()?;
+        let dialog = self.confirm_dialog.as_ref()?;
+        let sf = gl_state.window.scale_factor() as f32;
+        let phys = gl_state.window.inner_size();
+        let status_h = RenderEngine::status_bar_height(&self.config, font_sys, sf as f64);
+        Some(dialog.layout(
+            phys.width as f32,
+            phys.height as f32,
+            font_sys.metrics.cell_width,
+            font_sys.metrics.cell_height,
+            sf,
+            status_h,
+        ))
+    }
+
+    fn open_close_document_confirm(&mut self) {
+        let document = self.editor.active_doc_ref();
+        let files = vec![document.file_name()];
+        let can_save = document.path().is_some();
+        self.confirm_dialog = Some(ConfirmDialog::close_document(files, can_save));
+        self.request_redraw();
+    }
+
+    fn handle_ipc_editor_request(&mut self, request: crate::ipc::IpcEditorRequest) {
+        if let Some(tab_idx) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.panes.iter().any(|pane| pane.id == request.pane_id))
+        {
+            self.active_tab = tab_idx;
+            if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                tab.active_pane_id = request.pane_id;
+            }
+        }
+
+        self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+        self.editor.editor_focused = true;
+        self.editor.active_panel = crate::editor::SidebarPanel::Explorer;
+
+        let path = request.path.as_ref().map(PathBuf::from);
+        match path {
+            Some(path) if path.is_dir() => {
+                self.editor.open_folder(&path);
+            }
+            Some(path) => {
+                let parent = path.parent().map(Path::to_path_buf);
+                let _ = self.editor.open_file(&path, self.proxy.clone());
+                if let Some(parent) = parent {
+                    self.editor.open_folder(parent);
+                }
+            }
+            None => {
+                if let Some(cwd) = request.cwd {
+                    self.editor.open_folder(cwd);
+                }
+            }
+        }
+
+        self.resize_all_tabs();
+        self.sync_window_title();
+        self.request_redraw();
+        if let Some(gl_state) = &self.gl_state {
+            gl_state.window.focus_window();
+        }
+    }
+
+    fn request_exit(&mut self, event_loop: &ActiveEventLoop) {
+        self.close_context_menu();
+        self.help_dialog = None;
+        let dirty = self.editor.dirty_documents();
+        if dirty.is_empty() {
+            self.perform_exit(event_loop);
+            return;
+        }
+        let can_save_all = dirty.iter().all(|(_, has_path)| *has_path);
+        let files = dirty.into_iter().map(|(name, _)| name).collect();
+        self.confirm_dialog = Some(ConfirmDialog::quit(files, can_save_all));
+        self.request_redraw();
+    }
+
+    fn perform_exit(&mut self, event_loop: &ActiveEventLoop) {
+        for tab in &self.tabs {
+            tab.shutdown_all();
+        }
+        if let Some(path) = &self.ipc_socket {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Some(gl_state) = self.gl_state.take() {
+            gl_state.renderer.destroy(&gl_state.gl);
+        }
+        event_loop.exit();
+    }
+
+    fn apply_confirm_choice(&mut self, choice: ConfirmChoice, event_loop: &ActiveEventLoop) {
+        let Some(mut dialog) = self.confirm_dialog.take() else {
+            return;
+        };
+        match choice {
+            ConfirmChoice::Cancel => {}
+            ConfirmChoice::Save => {
+                if let Err(err) = self.editor.save_active_document() {
+                    dialog.set_error(err);
+                    self.confirm_dialog = Some(dialog);
+                } else {
+                    self.editor.close_active_document();
+                }
+            }
+            ConfirmChoice::Discard => {
+                self.editor.close_active_document();
+            }
+            ConfirmChoice::SaveAll => {
+                if let Err(err) = self.editor.save_all_dirty() {
+                    dialog.set_error(err);
+                    self.confirm_dialog = Some(dialog);
+                } else {
+                    self.perform_exit(event_loop);
+                    return;
+                }
+            }
+            ConfirmChoice::DiscardAll => {
+                self.perform_exit(event_loop);
+                return;
+            }
+        }
+        self.request_redraw();
     }
 
     fn sync_ime_policy(&mut self) {
@@ -1648,6 +1797,7 @@ impl OceanApp {
             split_div,
             self.ime_preedit.as_deref(),
             editor_exclusive,
+            self.confirm_dialog.as_ref(),
         );
 
         gl_state.renderer.draw(
@@ -1764,6 +1914,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     }
                 }
             }
+            AppEvent::IpcEditorRequest(request) => {
+                self.handle_ipc_editor_request(request);
+            }
             AppEvent::ChildExited(pane_id) => {
                 self.close_pane_by_id(pane_id, event_loop);
                 if self.config.check_modified() {
@@ -1785,13 +1938,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
     ) {
         match event {
             WindowEvent::CloseRequested => {
-                for tab in &self.tabs {
-                    tab.shutdown_all();
-                }
-                if let Some(gl_state) = self.gl_state.take() {
-                    gl_state.renderer.destroy(&gl_state.gl);
-                }
-                event_loop.exit();
+                self.request_exit(event_loop);
             }
             WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
@@ -1839,56 +1986,73 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             WindowEvent::ModifiersChanged(new_mods) => {
                 self.modifiers = new_mods.state();
             }
-            WindowEvent::Ime(ime_event) => match ime_event {
-                Ime::Enabled => {
+            WindowEvent::Ime(ime_event) => {
+                if self.confirm_dialog.is_some() {
                     self.ime_preedit = None;
+                    return;
                 }
-                Ime::Preedit(text, _) => {
-                    self.ime_preedit = if text.is_empty() { None } else { Some(text) };
-                    self.request_redraw();
-                }
-                Ime::Commit(text) => {
-                    self.ime_preedit = None;
-                    self.close_context_menu();
-                    if self.help_dialog.is_some() {
-                        return;
+                match ime_event {
+                    Ime::Enabled => {
+                        self.ime_preedit = None;
                     }
-                    if !text.is_empty() {
-                        if self.config.mouse_hide_while_typing {
-                            self.set_mouse_hidden(true);
-                        }
-
-                        // The editor owns text input whenever it has focus.
-                        if self.editor.is_active()
-                            && (self.editor.editor_focused
-                                || self.editor.mode == crate::editor::WorkspaceMode::PureEditor)
-                        {
-                            if self.editor.accepts_text_input()
-                                && let Some(font_sys) = &mut self.font_sys
-                            {
-                                self.editor.insert_ime_commit(&text, font_sys);
-                            }
-                            self.reset_cursor_blink();
-                            self.request_redraw();
+                    Ime::Preedit(text, _) => {
+                        self.ime_preedit = if text.is_empty() { None } else { Some(text) };
+                        self.request_redraw();
+                    }
+                    Ime::Commit(text) => {
+                        self.ime_preedit = None;
+                        self.close_context_menu();
+                        if self.help_dialog.is_some() {
                             return;
                         }
+                        if !text.is_empty() {
+                            if self.config.mouse_hide_while_typing {
+                                self.set_mouse_hidden(true);
+                            }
 
-                        if let Some(session) = self.active_session() {
-                            session.clear_selection();
-                            session.scroll(Scroll::Bottom);
-                            session.write_bytes(text.into_bytes());
+                            // The editor owns text input whenever it has focus.
+                            if self.editor.is_active()
+                                && (self.editor.editor_focused
+                                    || self.editor.mode == crate::editor::WorkspaceMode::PureEditor)
+                            {
+                                if self.editor.accepts_text_input()
+                                    && let Some(font_sys) = &mut self.font_sys
+                                {
+                                    self.editor.insert_ime_commit(&text, font_sys);
+                                }
+                                self.reset_cursor_blink();
+                                self.request_redraw();
+                                return;
+                            }
+
+                            if let Some(session) = self.active_session() {
+                                session.clear_selection();
+                                session.scroll(Scroll::Bottom);
+                                session.write_bytes(text.into_bytes());
+                            }
+                            self.reset_cursor_blink();
                         }
-                        self.reset_cursor_blink();
+                        self.request_redraw();
                     }
-                    self.request_redraw();
+                    Ime::Disabled => {
+                        self.ime_preedit = None;
+                        self.request_redraw();
+                    }
                 }
-                Ime::Disabled => {
-                    self.ime_preedit = None;
-                    self.request_redraw();
-                }
-            },
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
+                    return;
+                }
+                if self.confirm_dialog.is_some() {
+                    let choice = self.confirm_dialog.as_mut().and_then(|dialog| {
+                        dialog.handle_key(&event.logical_key, self.modifiers.control_key())
+                    });
+                    if let Some(choice) = choice {
+                        self.apply_confirm_choice(choice, event_loop);
+                    } else {
+                        self.request_redraw();
+                    }
                     return;
                 }
 
@@ -2026,6 +2190,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             &ws_dir,
                             self.proxy.clone(),
                         ) {
+                            if self.editor.take_close_confirm() {
+                                self.open_close_document_confirm();
+                            }
                             self.reset_cursor_blink();
                             self.sync_ime_policy();
                             self.request_redraw();
@@ -2469,6 +2636,22 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 let px = self.cursor_pos.x as f32;
                 let py = self.cursor_pos.y as f32;
 
+                if self.confirm_dialog.is_some() {
+                    let choice = if state == ElementState::Pressed {
+                        self.current_confirm_layout().and_then(|layout| {
+                            self.confirm_dialog
+                                .as_ref()
+                                .and_then(|dialog| dialog.hit_test(&layout, px, py))
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(choice) = choice {
+                        self.apply_confirm_choice(choice, event_loop);
+                    }
+                    return;
+                }
+
                 if state == ElementState::Released && button == MouseButton::Left {
                     self.editor.dragging_split_divider = false;
                     self.editor.explorer.dragging_divider = false;
@@ -2805,6 +2988,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                     self.modifiers,
                                     self.proxy.clone(),
                                 );
+                            }
+                            if self.editor.take_close_confirm() {
+                                self.open_close_document_confirm();
                             }
                             self.reset_cursor_blink();
                             self.request_redraw();

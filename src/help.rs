@@ -677,6 +677,14 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "Toggle built-in editor / editor+terminal split",
             ),
             RawDocItem::KeyValue(
+                "edit [path] (in Ocean shell)",
+                "Switch this window into editor mode without opening a new window",
+            ),
+            RawDocItem::KeyValue(
+                "Dirty close / quit",
+                "Prompts Save / Discard / Cancel; :q! is the explicit force-discard",
+            ),
+            RawDocItem::KeyValue(
                 "editor-keymap = vim",
                 "Enable Normal/Insert/Visual modes (i, Esc, v, V, d/y/c, :w/:q)",
             ),

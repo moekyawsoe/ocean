@@ -87,6 +87,7 @@ pub struct EditorWorkspace {
     pub vim: VimState,
     pub active_panel: SidebarPanel,
     pub activity_bar_visible: bool,
+    pub close_confirm_requested: bool,
 }
 
 impl Default for EditorWorkspace {
@@ -128,7 +129,69 @@ impl EditorWorkspace {
             vim: VimState::new(false),
             active_panel: SidebarPanel::Explorer,
             activity_bar_visible: true,
+            close_confirm_requested: false,
         }
+    }
+
+    pub fn has_unsaved(&self) -> bool {
+        self.documents.iter().any(EditorDocument::is_dirty)
+    }
+
+    pub fn dirty_documents(&self) -> Vec<(String, bool)> {
+        self.documents
+            .iter()
+            .filter(|document| document.is_dirty())
+            .map(|document| (document.file_name(), document.path().is_some()))
+            .collect()
+    }
+
+    pub fn request_close_active(&mut self) {
+        if self.active_doc_ref().is_dirty() {
+            self.close_confirm_requested = true;
+        } else {
+            self.close_active_document();
+        }
+    }
+
+    pub fn take_close_confirm(&mut self) -> bool {
+        std::mem::take(&mut self.close_confirm_requested)
+    }
+
+    pub fn save_active_document(&mut self) -> Result<(), String> {
+        let name = self.active_doc_ref().file_name();
+        let path = self.active_doc().path().cloned();
+        match self.active_doc().save() {
+            Ok(()) => {
+                if let Some(path) = path {
+                    self.lsp.did_save(&path);
+                }
+                Ok(())
+            }
+            Err(err) => Err(format!("Could not save {name}: {err}")),
+        }
+    }
+
+    pub fn save_all_dirty(&mut self) -> Result<(), String> {
+        let mut saved_paths = Vec::new();
+        for document in &mut self.documents {
+            if !document.is_dirty() {
+                continue;
+            }
+            let name = document.file_name();
+            let Some(path) = document.path().cloned() else {
+                return Err(format!(
+                    "{name} has no file path; save it manually before quitting."
+                ));
+            };
+            if let Err(err) = document.save() {
+                return Err(format!("Could not save {name}: {err}"));
+            }
+            saved_paths.push(path);
+        }
+        for path in saved_paths {
+            self.lsp.did_save(&path);
+        }
+        Ok(())
     }
 
     pub fn editor_tab_height(line_h: f32) -> f32 {
@@ -710,7 +773,7 @@ impl EditorWorkspace {
 
         // Ctrl+W: Close Document
         if ctrl && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("w")) {
-            self.close_active_document();
+            self.request_close_active();
             return true;
         }
 
@@ -874,15 +937,17 @@ impl EditorWorkspace {
         if let Some(reverse) = outcome.next_match {
             self.jump_to_next_match(font_sys, reverse);
         }
-        if outcome.save {
-            let path = self.active_doc().path().cloned();
-            if let Err(err) = self.active_doc().save() {
-                self.vim.set_status(format!("E: {err}"));
-            } else if let Some(path) = path {
-                self.lsp.did_save(&path);
-            }
+        let mut save_failed = false;
+        if outcome.save
+            && let Err(err) = self.save_active_document()
+        {
+            self.vim.set_status(err);
+            save_failed = true;
         }
-        if outcome.close {
+        if outcome.confirm_close {
+            self.request_close_active();
+        }
+        if outcome.close && !save_failed {
             self.close_active_document();
         }
     }
@@ -1017,7 +1082,7 @@ impl EditorWorkspace {
                     let tab_x = code_vp.x + 4.0 + tab_idx as f32 * (tab_w + 4.0);
                     self.active_doc_idx = tab_idx;
                     if px >= tab_x + tab_w - 20.0 && px <= tab_x + tab_w {
-                        self.close_active_document();
+                        self.request_close_active();
                     }
                     return true;
                 }
@@ -1495,7 +1560,7 @@ impl EditorWorkspace {
                 self.new_document();
             }
             PaletteAction::CloseFile => {
-                self.close_active_document();
+                self.request_close_active();
             }
             PaletteAction::FindInFile => {
                 self.find_bar.open();
@@ -1659,6 +1724,7 @@ struct VimOutcome {
     changed: bool,
     save: bool,
     close: bool,
+    confirm_close: bool,
     open_find: bool,
     next_match: Option<bool>,
 }
@@ -2120,7 +2186,7 @@ fn execute_vim_ex(
         }
         "q" => {
             if doc.is_dirty() {
-                vim.set_status("E37: unsaved changes (use :q!)");
+                out.confirm_close = true;
             } else {
                 out.close = true;
             }

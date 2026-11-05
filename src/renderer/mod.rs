@@ -1,6 +1,7 @@
 pub mod atlas;
 pub mod box_drawing;
 
+use std::cell::Cell;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
@@ -10,16 +11,38 @@ use glow::HasContext;
 
 use crate::config::theme::Rgb;
 use crate::config::{Config, CursorStyle, TabBarMode};
+use crate::confirm::ConfirmDialog;
 use crate::font::myanmar::is_myanmar_run_char;
 use crate::font::shaper::{CellInput, PositionedGlyph, TextShaper};
 use crate::font::{FontStyle, FontSystem};
 use crate::help::{HelpDialog, SECTION_TITLES, StyledLine};
 use crate::menu::{ContextMenu, MenuEntry, ThemeSubEntry};
 use crate::split::{PaneLayout, SplitDivider};
-use crate::statusbar::{StatusBarContext, StatusBarGeometry, StatusMode};
+use crate::statusbar::{
+    STATUS_BAR_TEXT_SCALE, STATUS_BAR_VERTICAL_PAD, StatusBarContext, StatusBarGeometry, StatusMode,
+};
 use crate::terminal::{RenderCell, TerminalSnapshot};
 use atlas::GlyphAtlas;
 use box_drawing::{emit_box_char, is_procedural_box_char};
+
+thread_local! {
+    static SHAPED_LABEL_SCALE: Cell<f32> = const { Cell::new(1.0) };
+}
+
+struct LabelScaleGuard(f32);
+
+impl LabelScaleGuard {
+    fn new(scale: f32) -> Self {
+        let previous = SHAPED_LABEL_SCALE.with(|cell| cell.replace(scale));
+        Self(previous)
+    }
+}
+
+impl Drop for LabelScaleGuard {
+    fn drop(&mut self) {
+        SHAPED_LABEL_SCALE.with(|cell| cell.set(self.0));
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -120,7 +143,9 @@ impl RenderEngine {
 
     pub fn status_bar_height(config: &Config, font_sys: &FontSystem, scale_factor: f64) -> f32 {
         if config.window_show_status_bar {
-            (font_sys.metrics.cell_height + (6.0 * scale_factor as f32).round()).round()
+            (font_sys.metrics.cell_height * STATUS_BAR_TEXT_SCALE
+                + (STATUS_BAR_VERTICAL_PAD * scale_factor as f32).round())
+            .round()
         } else {
             0.0
         }
@@ -195,6 +220,7 @@ impl RenderEngine {
         split_divider: Option<(f32, f32, f32, f32)>,
         editor_preedit: Option<&str>,
         editor_exclusive: bool,
+        confirm_dialog: Option<&ConfirmDialog>,
     ) -> (&mut GlyphAtlas, &[QuadInstance]) {
         self.bg_instances.clear();
         self.fg_instances.clear();
@@ -294,6 +320,19 @@ impl RenderEngine {
                 win_h,
                 scale_factor,
                 status_hover_id,
+            );
+        }
+
+        // Unsaved-changes confirmation is the topmost modal.
+        if let Some(dialog) = confirm_dialog {
+            self.emit_confirm_dialog(
+                config,
+                font_sys,
+                dialog,
+                win_w,
+                win_h,
+                scale_factor,
+                status_h,
             );
         }
 
@@ -743,6 +782,217 @@ impl RenderEngine {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn emit_confirm_dialog(
+        &mut self,
+        config: &Config,
+        font_sys: &mut FontSystem,
+        dialog: &ConfirmDialog,
+        win_w: u32,
+        win_h: u32,
+        scale_factor: f64,
+        status_h: f32,
+    ) {
+        let cw = font_sys.metrics.cell_width;
+        let ch = font_sys.metrics.cell_height;
+        let baseline = font_sys.metrics.baseline;
+        let sf = scale_factor.max(0.5) as f32;
+        let layout = dialog.layout(win_w as f32, win_h as f32, cw, ch, sf, status_h);
+
+        let bg = config.colors.background;
+        let fg = config.colors.foreground;
+        let is_dark = bg.relative_luminance() < 0.35;
+        let panel = if is_dark {
+            Rgb::new(
+                bg.r.saturating_add(16),
+                bg.g.saturating_add(20),
+                bg.b.saturating_add(28),
+            )
+        } else {
+            Rgb::new(
+                bg.r.saturating_sub(16),
+                bg.g.saturating_sub(14),
+                bg.b.saturating_sub(10),
+            )
+        };
+
+        self.overlay_instances.push(QuadInstance::solid(
+            0.0,
+            0.0,
+            win_w as f32,
+            win_h as f32,
+            [0.0, 0.0, 0.0, 0.55],
+        ));
+        self.overlay_instances.push(QuadInstance::solid(
+            layout.x + 8.0,
+            layout.y + 8.0,
+            layout.w,
+            layout.h,
+            [0.0, 0.0, 0.0, 0.35],
+        ));
+        self.overlay_instances.push(QuadInstance::solid(
+            layout.x,
+            layout.y,
+            layout.w,
+            layout.h,
+            panel.to_f32_rgba(0.99),
+        ));
+        self.overlay_instances.push(QuadInstance::hollow(
+            layout.x,
+            layout.y,
+            layout.w,
+            layout.h,
+            fg.to_f32_rgba(0.28),
+        ));
+
+        let text_x = layout.x + (16.0 * sf).round();
+        let max_chars = (((layout.w - 32.0 * sf) / cw).floor().max(8.0)) as usize;
+        let mut y = layout.y + (14.0 * sf).round() + ch;
+
+        Self::emit_shaped_label(
+            &mut self.atlas,
+            &mut self.shaper,
+            &mut self.overlay_instances,
+            config,
+            font_sys,
+            &dialog.title,
+            max_chars,
+            text_x,
+            y,
+            config.colors.ansi[4].to_f32_rgba(1.0),
+            true,
+        );
+        y += (ch * 1.55).round();
+        Self::emit_shaped_label(
+            &mut self.atlas,
+            &mut self.shaper,
+            &mut self.overlay_instances,
+            config,
+            font_sys,
+            &dialog.message,
+            max_chars,
+            text_x,
+            y,
+            fg.to_f32_rgba(0.88),
+            false,
+        );
+        y += (ch * 1.25).round();
+
+        for file in dialog.files.iter().take(8) {
+            let label = format!("• {file}");
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.overlay_instances,
+                config,
+                font_sys,
+                &label,
+                max_chars,
+                text_x,
+                y,
+                fg.to_f32_rgba(0.66),
+                false,
+            );
+            y += (ch * 1.05).round();
+        }
+
+        if let Some(error) = &dialog.error {
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.overlay_instances,
+                config,
+                font_sys,
+                error,
+                max_chars,
+                text_x,
+                y + (ch * 0.35).round(),
+                config.colors.ansi[1].to_f32_rgba(1.0),
+                false,
+            );
+        }
+
+        let hint_y = layout
+            .buttons
+            .first()
+            .map(|(_, _, button_y, _, _)| button_y - (ch * 0.75).round())
+            .unwrap_or(layout.y + layout.h - ch);
+        Self::emit_shaped_label(
+            &mut self.atlas,
+            &mut self.shaper,
+            &mut self.overlay_instances,
+            config,
+            font_sys,
+            "Left/Right select · Enter confirm · Esc cancel",
+            max_chars,
+            text_x,
+            hint_y,
+            fg.to_f32_rgba(0.50),
+            false,
+        );
+
+        let selected = dialog.selected_choice();
+        for (choice, x, button_y, width, height) in &layout.buttons {
+            let is_selected = *choice == selected;
+            let accent = if choice.is_destructive() {
+                config.colors.ansi[1]
+            } else {
+                config.colors.cursor_color
+            };
+            let button_bg = if is_selected {
+                accent.ensure_contrast(panel, 2.4)
+            } else {
+                panel
+            };
+            self.overlay_instances.push(QuadInstance::solid(
+                *x,
+                *button_y,
+                *width,
+                *height,
+                if is_selected {
+                    button_bg.to_f32_rgba(0.98)
+                } else {
+                    fg.to_f32_rgba(0.07)
+                },
+            ));
+            self.overlay_instances.push(QuadInstance::hollow(
+                *x,
+                *button_y,
+                *width,
+                *height,
+                if is_selected {
+                    accent.to_f32_rgba(1.0)
+                } else {
+                    fg.to_f32_rgba(0.24)
+                },
+            ));
+
+            let label = choice.label();
+            let text_w = label.chars().count() as f32 * cw;
+            let text_color = if is_selected {
+                if button_bg.relative_luminance() > 0.34 {
+                    Rgb::new(10, 15, 22)
+                } else {
+                    Rgb::new(250, 252, 255)
+                }
+            } else {
+                fg
+            };
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.overlay_instances,
+                config,
+                font_sys,
+                label,
+                (width / cw).floor().max(4.0) as usize,
+                x + ((width - text_w) * 0.5).max(3.0),
+                button_y + (height - ch) * 0.5 + baseline,
+                text_color.to_f32_rgba(1.0),
+                true,
+            );
+        }
+    }
+
     fn emit_context_menu(
         &mut self,
         config: &Config,
@@ -1640,8 +1890,9 @@ impl RenderEngine {
         scale_factor: f64,
         status_hover_id: Option<usize>,
     ) {
-        let cw = font_sys.metrics.cell_width;
-        let ch = font_sys.metrics.cell_height;
+        let _scale_guard = LabelScaleGuard::new(STATUS_BAR_TEXT_SCALE);
+        let cw = font_sys.metrics.cell_width * STATUS_BAR_TEXT_SCALE;
+        let ch = font_sys.metrics.cell_height * STATUS_BAR_TEXT_SCALE;
         let Some(geom) =
             StatusBarGeometry::compute(config, ctx, cw, ch, win_w, win_h, scale_factor)
         else {
@@ -1696,7 +1947,7 @@ impl RenderEngine {
         ));
 
         let text_top = geom.y + 1.0 + ((geom.h - 1.0 - ch) * 0.5).round();
-        let baseline_y = text_top + font_sys.metrics.baseline;
+        let baseline_y = text_top + font_sys.metrics.baseline * STATUS_BAR_TEXT_SCALE;
 
         // 1. Left Neovim-style mode badge (` OCEAN `, ` TUI `, ` SCROLL `, ` MENU `, ` THEME `, ` HELP `)
         let raw_mode_bg = match geom.mode {
@@ -1983,20 +2234,22 @@ impl RenderEngine {
         let mut glyphs = Vec::new();
         shaper.shape_row(font_sys, &inputs, config.myanmar_zawgyi, &mut glyphs);
         let text_alpha = fg_col[3];
+        let scale = SHAPED_LABEL_SCALE.with(|cell| cell.get()).clamp(0.3, 1.0);
 
         for pg in &glyphs {
-            let fpx = if pg.is_myanmar {
+            let base_px = if pg.is_myanmar {
                 font_sys.metrics.myanmar_font_px
             } else {
                 font_sys.metrics.font_px
             };
+            let fpx = base_px * scale;
             let entry =
                 atlas.get_or_rasterize(font_sys, pg.font_id, pg.glyph_id, fpx, config.font_thicken);
             if entry.width == 0 || entry.height == 0 {
                 continue;
             }
-            let gx = (start_x + pg.x + entry.left as f32 * pg.x_scale).round();
-            let gy = (baseline_y - pg.y_offset - entry.top as f32).round();
+            let gx = (start_x + pg.x * scale + entry.left as f32 * pg.x_scale).round();
+            let gy = (baseline_y - pg.y_offset * scale - entry.top as f32).round();
             target.push(QuadInstance {
                 pos: [gx, gy],
                 size: [entry.width as f32 * pg.x_scale, entry.height as f32],
@@ -2656,6 +2909,7 @@ mod tests {
                 None,
                 None,
                 false,
+                None,
             );
             save_scene_png(
                 Path::new(&splits_png),
@@ -2688,6 +2942,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         assert!(!instances.is_empty());
 
@@ -2725,6 +2980,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         assert!(!instances_h.is_empty());
 
@@ -2806,6 +3062,7 @@ mod tests {
                 None,
                 None,
                 false,
+                None,
             );
             save_scene_png(
                 Path::new(&light_png),
@@ -2839,6 +3096,7 @@ mod tests {
                     None,
                     None,
                     false,
+                    None,
                 );
                 save_scene_png(
                     Path::new(&light_help_png),
@@ -2902,6 +3160,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
 
         let ch = font_sys.metrics.cell_height;

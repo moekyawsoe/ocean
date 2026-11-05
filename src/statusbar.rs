@@ -5,6 +5,11 @@ use crate::config::{Config, ZawgyiMode};
 use crate::help::HelpDialog;
 use crate::menu::ContextMenu;
 
+/// The bottom status bar renders slightly smaller than the terminal grid.
+pub const STATUS_BAR_TEXT_SCALE: f32 = 0.80;
+/// Vertical padding above/below the status bar text (before scale factor).
+pub const STATUS_BAR_VERTICAL_PAD: f32 = 4.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusMode {
     Normal,
@@ -183,8 +188,8 @@ impl StatusBarGeometry {
         }
         let sf = scale_factor as f32;
         let cw = cell_w.max(5.0);
-        let ch = cell_h.max(10.0);
-        let bar_h = (ch + (6.0 * sf).round()).round();
+        let ch = cell_h.max(8.0);
+        let bar_h = (ch + (STATUS_BAR_VERTICAL_PAD * sf).round()).round();
         if (win_h as f32) < bar_h + ch {
             return None;
         }

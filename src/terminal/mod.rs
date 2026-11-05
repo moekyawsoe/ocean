@@ -36,6 +36,7 @@ pub enum AppEvent {
     ),
     ChildExited(u64),
     UpdateAvailable(crate::update::UpdateInfo),
+    IpcEditorRequest(crate::ipc::IpcEditorRequest),
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -49,6 +50,9 @@ impl std::fmt::Debug for AppEvent {
             Self::ChildExited(id) => write!(f, "ChildExited({id})"),
             Self::UpdateAvailable(info) => {
                 write!(f, "UpdateAvailable({})", info.version)
+            }
+            Self::IpcEditorRequest(request) => {
+                write!(f, "IpcEditorRequest(pane={})", request.pane_id)
             }
         }
     }
@@ -186,6 +190,7 @@ impl TerminalSession {
         rows: u16,
         cell_w: u16,
         cell_h: u16,
+        ocean_socket: Option<&std::path::Path>,
         proxy: EventLoopProxy<AppEvent>,
         wakeup_queued: Arc<AtomicBool>,
     ) -> Result<Self, String> {
@@ -244,6 +249,10 @@ impl TerminalSession {
         }
         for (k, v) in &config.env {
             env.insert(k.clone(), v.clone());
+        }
+        if let Some(socket) = ocean_socket {
+            env.insert("OCEAN_SOCKET".to_string(), socket.display().to_string());
+            env.insert("OCEAN_PANE_ID".to_string(), id.to_string());
         }
 
         let pty_opts = PtyOptions {

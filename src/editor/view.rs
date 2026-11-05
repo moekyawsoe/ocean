@@ -315,7 +315,9 @@ impl EditorView {
         }
 
         // 3. Status Bar (bottom of editor view)
-        let status_h = (line_h + 4.0).round();
+        const STATUS_TEXT_SCALE: f32 = 0.80;
+        let status_text_h = line_h * STATUS_TEXT_SCALE;
+        let status_h = (status_text_h + 4.0).round();
         let status_y = vp.y + vp.h - status_h;
 
         bg_instances.push(QuadInstance::solid(
@@ -334,7 +336,8 @@ impl EditorView {
         ));
 
         // Status bar elements
-        let status_baseline = status_y + (status_h - line_h) * 0.5 + baseline;
+        let status_baseline =
+            status_y + (status_h - status_text_h) * 0.5 + baseline * STATUS_TEXT_SCALE;
         let mode_text = if let Some(vim) = vim {
             format!(" {} ", vim.indicator())
         } else if is_focused {
@@ -348,7 +351,7 @@ impl EditorView {
             Some(VimMode::Command) => theme.ansi[3],
             _ => theme.ansi[4],
         };
-        emit_simple_string(
+        emit_simple_string_scaled(
             config,
             font_sys,
             atlas,
@@ -357,11 +360,13 @@ impl EditorView {
             vp.x + 8.0,
             status_baseline,
             mode_color.to_f32_rgba(1.0),
+            STATUS_TEXT_SCALE,
         );
 
         let file_info = format!("{}  {} lines", doc.file_name(), doc.buffer.len_lines());
-        let file_info_x = vp.x + 12.0 + (mode_text.chars().count() as f32 + 1.0) * cell_w;
-        emit_simple_string(
+        let file_info_x =
+            vp.x + 12.0 + (mode_text.chars().count() as f32 + 1.0) * cell_w * STATUS_TEXT_SCALE;
+        emit_simple_string_scaled(
             config,
             font_sys,
             atlas,
@@ -370,6 +375,7 @@ impl EditorView {
             file_info_x,
             status_baseline,
             theme.foreground.to_f32_rgba(0.85),
+            STATUS_TEXT_SCALE,
         );
 
         let error_count = diagnostics
@@ -399,8 +405,8 @@ impl EditorView {
             right_info.push_str(&format!("  |  {message}"));
         }
 
-        let right_w = right_info.chars().count() as f32 * cell_w;
-        emit_simple_string(
+        let right_w = right_info.chars().count() as f32 * cell_w * STATUS_TEXT_SCALE;
+        emit_simple_string_scaled(
             config,
             font_sys,
             atlas,
@@ -409,6 +415,7 @@ impl EditorView {
             (vp.x + vp.w - right_w - 12.0).max(vp.x + 200.0),
             status_baseline,
             theme.foreground.to_f32_rgba(0.70),
+            STATUS_TEXT_SCALE,
         );
 
         // 4. Main Code Area & Gutter
@@ -1505,18 +1512,32 @@ fn emit_simple_string(
     baseline_y: f32,
     color: [f32; 4],
 ) {
+    emit_simple_string_scaled(
+        config, font_sys, atlas, instances, text, start_x, baseline_y, color, 1.0,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_simple_string_scaled(
+    config: &Config,
+    font_sys: &mut FontSystem,
+    atlas: &mut GlyphAtlas,
+    instances: &mut Vec<QuadInstance>,
+    text: &str,
+    start_x: f32,
+    baseline_y: f32,
+    color: [f32; 4],
+    scale: f32,
+) {
+    let advance = font_sys.metrics.cell_width * scale;
+    let font_px = font_sys.metrics.font_px * scale;
     let mut cur_x = start_x;
     for ch in text.chars() {
         let font_id = font_sys.resolve_font_for_char(ch, FontStyle::Regular);
         let gid = font_sys.font(font_id).glyph_id(ch);
         if gid != 0 {
-            let entry = atlas.get_or_rasterize(
-                font_sys,
-                font_id,
-                gid,
-                font_sys.metrics.font_px,
-                config.font_thicken,
-            );
+            let entry =
+                atlas.get_or_rasterize(font_sys, font_id, gid, font_px, config.font_thicken);
             if entry.width > 0 && entry.height > 0 {
                 let gx = (cur_x + entry.left as f32).round();
                 let gy = (baseline_y - entry.top as f32).round();
@@ -1530,6 +1551,6 @@ fn emit_simple_string(
                 });
             }
         }
-        cur_x += font_sys.metrics.cell_width;
+        cur_x += advance;
     }
 }
