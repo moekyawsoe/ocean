@@ -165,7 +165,6 @@ pub struct TerminalSnapshot {
     pub mode: TermMode,
 }
 
-
 pub struct TerminalSession {
     pub id: u64,
     pub title: String,

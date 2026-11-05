@@ -79,6 +79,8 @@ pub enum Action {
     ShowHelp,
     EditConfig,
     TriggerUpdate,
+    ToggleEditor,
+    ToggleSplitMode,
     Quit,
     SendText(Vec<u8>),
     Ignore,
@@ -148,6 +150,8 @@ pub fn default_keybinds() -> Vec<Keybind> {
         "ctrl+shift+m=toggle_myanmar_zawgyi",
         "ctrl+shift+slash=show_help",
         "ctrl+shift+question=show_help",
+        "ctrl+backslash=toggle_split_mode",
+        "ctrl+shift+i=toggle_editor",
         "ctrl+shift+q=quit",
     ];
     entries.iter().filter_map(|s| parse_keybind(s)).collect()
@@ -380,6 +384,8 @@ fn parse_action(rhs: &str) -> Option<Action> {
         "update" | "check_update" | "check-update" | "trigger_update" => {
             Some(Action::TriggerUpdate)
         }
+        "toggle_editor" | "editor" | "code_editor" => Some(Action::ToggleEditor),
+        "toggle_split_mode" | "split_mode" => Some(Action::ToggleSplitMode),
         "quit" => Some(Action::Quit),
         "text" => Some(Action::SendText(unescape_bytes(arg.unwrap_or("")))),
         "csi" => {

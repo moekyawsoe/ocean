@@ -1,14 +1,15 @@
 [package]
 name = "ocean"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
-description = "Clean, lightweight, GPU-accelerated terminal emulator with full Myanmar/Burmese support and Ghostty-style config"
+description = "Clean, lightweight, GPU-accelerated terminal emulator and built-in code editor with full Myanmar/Burmese support"
 license = "MIT"
 homepage = "https://github.com/moekyawsoe/ocean"
 repository = "https://github.com/moekyawsoe/ocean"
 readme = "README.md"
 
 [dependencies]
+# Existing Ocean Core
 alacritty_terminal = { version = "0.26", default-features = false }
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"] }
 fontdb = "0.24"
@@ -21,9 +22,29 @@ raw-window-handle = "0.6"
 rustc-hash = "2.1"
 rustybuzz = "0.20"
 serde_json = "1.0.154"
+url = "2.5"
 swash = "0.2"
 unicode-width = "0.2"
 winit = "0.30"
+
+# Editor Extensions: Buffer & Unicode
+ropey = "1.6"
+unicode-segmentation = "1.12"
+
+# Editor Extensions: Async Runtime & Protocols
+tokio = { version = "1.40", features = ["rt-multi-thread", "process", "io-util", "sync", "macros"] }
+lsp-types = "0.97"
+serde = { version = "1.0", features = ["derive"] }
+
+# Editor Extensions: Tree-sitter & Search
+tree-sitter = "0.24"
+tree-sitter-highlight = "0.24"
+nucleo-matcher = "0.3"
+ignore = "0.4"
+
+# Editor Extensions: WASM Plugin Engine
+extism = "1.5"
+anyhow = "1.0"
 
 [profile.release]
 opt-level = 3

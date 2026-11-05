@@ -1,5 +1,6 @@
 mod app;
 mod config;
+pub mod editor;
 mod font;
 mod help;
 mod menu;
@@ -25,9 +26,24 @@ use terminal::snapshot_from_bytes;
 
 use crate::config::STARTER_CONFIG;
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedCli {
+    pub config_path: Option<PathBuf>,
+    pub working_dir: Option<PathBuf>,
+    pub exec_cmd: Option<(String, Vec<String>)>,
+    pub screenshot_out: Option<PathBuf>,
+    pub screenshot_preset: Option<String>,
+    pub plus_action: Option<String>,
+    pub force_flag: bool,
+    pub backend: Option<String>,
+    pub cli_overrides: Vec<(String, String)>,
+    pub editor_file: Option<PathBuf>,
+    pub initial_editor_mode: bool,
+    pub print_help: bool,
+    pub print_version: bool,
+}
 
+pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
     let mut config_path: Option<PathBuf> = None;
     let mut working_dir: Option<PathBuf> = None;
     let mut exec_cmd: Option<(String, Vec<String>)> = None;
@@ -35,19 +51,37 @@ fn main() {
     let mut screenshot_preset: Option<String> = None;
     let mut plus_action: Option<String> = None;
     let mut force_flag = false;
+    let mut backend: Option<String> = None;
     let mut cli_overrides: Vec<(String, String)> = Vec::new();
+
+    let is_edit_binary = prog_name.ends_with("/edit") || prog_name == "edit";
+    let mut editor_file: Option<PathBuf> = None;
+    let mut initial_editor_mode = is_edit_binary;
+    let mut print_help = false;
+    let mut print_version = false;
 
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
+            "edit" => {
+                initial_editor_mode = true;
+                if i + 1 < args.len()
+                    && !args[i + 1].starts_with('-')
+                    && !args[i + 1].starts_with('+')
+                {
+                    editor_file = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                    continue;
+                }
+            }
             "-h" | "--help" | "+help" => {
-                print_help();
-                return;
+                print_help = true;
+                break;
             }
             "-v" | "--version" | "+version" => {
-                println!("ocean {}", crate::update::running_version());
-                return;
+                print_version = true;
+                break;
             }
             "-e" | "--command" => {
                 if i + 1 < args.len() {
@@ -88,6 +122,19 @@ fn main() {
             "--force" => {
                 force_flag = true;
             }
+            "--x11" => {
+                backend = Some("x11".to_string());
+            }
+            "--wayland" => {
+                backend = Some("wayland".to_string());
+            }
+            "--backend" => {
+                if i + 1 < args.len() {
+                    backend = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
             s if s.starts_with('+') => {
                 plus_action = Some(s.to_string());
             }
@@ -102,6 +149,8 @@ fn main() {
                         screenshot_out = Some(PathBuf::from(v));
                     } else if k == "screenshot-preset" {
                         screenshot_preset = Some(v.to_string());
+                    } else if k == "backend" || k == "linux-display-server" {
+                        backend = Some(v.to_string());
                     } else {
                         cli_overrides.push((k.to_string(), v.to_string()));
                     }
@@ -111,18 +160,62 @@ fn main() {
                     continue;
                 }
             }
+            s if !s.starts_with('-') && !s.starts_with('+') => {
+                if initial_editor_mode && editor_file.is_none() {
+                    editor_file = Some(PathBuf::from(s));
+                }
+            }
             _ => {}
         }
         i += 1;
     }
 
-    let mut config = Config::load(config_path.as_deref());
-    for (k, v) in &cli_overrides {
+    if initial_editor_mode && editor_file.is_none() {
+        let cur_dir = working_dir
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        editor_file = Some(cur_dir);
+    }
+
+    ParsedCli {
+        config_path,
+        working_dir,
+        exec_cmd,
+        screenshot_out,
+        screenshot_preset,
+        plus_action,
+        force_flag,
+        backend,
+        cli_overrides,
+        editor_file,
+        initial_editor_mode,
+        print_help,
+        print_version,
+    }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let prog_name = std::env::args().next().unwrap_or_default();
+    let cli = parse_cli_args(&prog_name, &args);
+
+    if cli.print_help {
+        print_help();
+        return;
+    }
+    if cli.print_version {
+        println!("ocean {}", crate::update::running_version());
+        return;
+    }
+
+    let mut config = Config::load(cli.config_path.as_deref());
+    for (k, v) in &cli.cli_overrides {
         config.apply_cli_kv(k, v);
     }
 
-    if let Some(act) = plus_action {
-        run_plus_action(&act, &config, force_flag);
+    if let Some(act) = cli.plus_action {
+        run_plus_action(&act, &config, cli.force_flag);
         return;
     }
 
@@ -130,12 +223,12 @@ fn main() {
         eprintln!("[ocean config warning] {warn}");
     }
 
-    if let Some(out_png) = screenshot_out {
+    if let Some(out_png) = cli.screenshot_out {
         if let Err(err) = run_screenshot(
             &out_png,
             &config,
-            exec_cmd.as_ref(),
-            screenshot_preset.as_deref(),
+            cli.exec_cmd.as_ref(),
+            cli.screenshot_preset.as_deref(),
         ) {
             eprintln!("ocean screenshot failed: {err}");
             std::process::exit(1);
@@ -143,15 +236,56 @@ fn main() {
         return;
     }
 
-    let event_loop = EventLoop::<terminal::AppEvent>::with_user_event()
+    let backend_choice = cli
+        .backend
+        .as_deref()
+        .or(std::env::var("OCEAN_BACKEND").ok().as_deref())
+        .and_then(|s| s.parse::<crate::config::BackendMode>().ok())
+        .unwrap_or(config.backend);
+
+    let mut event_loop_builder = EventLoop::<terminal::AppEvent>::with_user_event();
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::wayland::EventLoopBuilderExtWayland;
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        match backend_choice {
+            crate::config::BackendMode::X11 => {
+                event_loop_builder.with_x11();
+            }
+            crate::config::BackendMode::Wayland => {
+                event_loop_builder.with_wayland();
+            }
+            crate::config::BackendMode::Auto => {
+                // Auto detection:
+                // Under GNOME Wayland sessions (Mutter), a known Wayland protocol race condition
+                // (error 0: invalid global wl_output) occurs in Mutter when the screen blanks, sleeps,
+                // or suspends, which terminates native Wayland clients abruptly.
+                // If running under GNOME Wayland and XWayland (DISPLAY) is available, use X11/XWayland
+                // by default to prevent ocean from being killed during screen blank or system sleep.
+                let is_gnome = std::env::var("XDG_CURRENT_DESKTOP")
+                    .map(|v| v.to_ascii_uppercase().contains("GNOME"))
+                    .unwrap_or(false);
+                let has_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+                let has_x11 = std::env::var_os("DISPLAY").is_some();
+                if is_gnome && has_wayland && has_x11 {
+                    event_loop_builder.with_x11();
+                }
+            }
+        }
+    }
+
+    let event_loop = event_loop_builder
         .build()
         .expect("Failed building Wayland/X11 event loop");
     let proxy = event_loop.create_proxy();
 
     let launch_opts = LaunchOptions {
-        config_path,
-        command: exec_cmd,
-        working_directory: working_dir,
+        config_path: cli.config_path,
+        command: cli.exec_cmd,
+        working_directory: cli.working_dir,
+        editor_file: cli.editor_file,
+        initial_editor_mode: cli.initial_editor_mode,
     };
 
     let mut app = OceanApp::new(config, launch_opts, proxy);
@@ -311,7 +445,9 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
             }
         }
         "+check-update" => {
-            println!("Checking GitHub Releases for ocean updates (https://api.github.com/repos/moekyawsoe/ocean/releases/latest)...");
+            println!(
+                "Checking GitHub Releases for ocean updates (https://api.github.com/repos/moekyawsoe/ocean/releases/latest)..."
+            );
             let cur = crate::update::running_version();
             match crate::update::check_for_update_online(&cur) {
                 Ok(Some(info)) => {
@@ -348,9 +484,7 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
                 Ok(Some(info)) => {
                     println!("Found newer release: {}", info.tag_name);
                     let (prog, args) = crate::update::generate_update_command(&info);
-                    let status = std::process::Command::new(&prog)
-                        .args(&args)
-                        .status();
+                    let status = std::process::Command::new(&prog).args(&args).status();
                     match status {
                         Ok(s) => std::process::exit(s.code().unwrap_or(0)),
                         Err(e) => {
@@ -518,6 +652,11 @@ fn run_screenshot(
             None,
             true,
             true,
+            None,
+            None,
+            None,
+            None,
+            false,
         );
 
         return save_scene_png(
@@ -592,6 +731,11 @@ fn run_screenshot(
         None,
         true,
         true,
+        None,
+        None,
+        None,
+        None,
+        false,
     );
 
     save_scene_png(
@@ -675,15 +819,23 @@ fn default_showcase_ansi() -> String {
 fn print_help() {
     println!(
         "\
-ocean {} — Clean, lightweight GPU terminal with full Myanmar/Burmese support
+ocean {} — Clean, lightweight GPU terminal and built-in code editor with full Myanmar/Burmese support
 
 USAGE:
     ocean [OPTIONS] [-e <COMMAND> [ARGS...]]
+    ocean edit [PATH]
+    edit [PATH]
     ocean +<ACTION>
+
+COMMANDS:
+    edit [PATH]                    Open built-in code editor directly (or run standalone `edit`)
 
 OPTIONS:
     -c, --config-file <PATH>       Load Ghostty-style config from PATH
         --working-directory <DIR>  Set initial shell working directory
+        --backend <auto|wayland|x11> Select display server backend (default: auto)
+        --x11                      Force X11 / XWayland backend
+        --wayland                  Force native Wayland backend
         --<KEY>=<VALUE>            Override any Ghostty config key (e.g. --theme=tokyo-night)
     -e, --command <CMD> [ARGS...]  Execute command instead of default login shell
         --screenshot <OUT.PNG>     Render terminal output to a PNG image and exit
@@ -702,4 +854,64 @@ ACTIONS (Ghostty-style):
     +update                        Download and upgrade Ocean to latest tagged release",
         crate::update::running_version()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_edit_binary_no_args_opens_cwd() {
+        let cli = parse_cli_args("edit", &[]);
+        assert!(cli.initial_editor_mode);
+        assert!(cli.editor_file.is_some());
+        let cur = std::env::current_dir().unwrap();
+        assert_eq!(cli.editor_file.unwrap(), cur);
+    }
+
+    #[test]
+    fn test_edit_binary_with_folder_arg() {
+        let cli = parse_cli_args("edit", &[String::from(".")]);
+        assert!(cli.initial_editor_mode);
+        assert_eq!(cli.editor_file, Some(PathBuf::from(".")));
+    }
+
+    #[test]
+    fn test_edit_binary_with_file_arg() {
+        let cli = parse_cli_args("/home/mks/.local/bin/edit", &[String::from("src/main.rs")]);
+        assert!(cli.initial_editor_mode);
+        assert_eq!(cli.editor_file, Some(PathBuf::from("src/main.rs")));
+    }
+
+    #[test]
+    fn test_ocean_edit_subcommand_no_args() {
+        let cli = parse_cli_args("ocean", &[String::from("edit")]);
+        assert!(cli.initial_editor_mode);
+        assert!(cli.editor_file.is_some());
+        let cur = std::env::current_dir().unwrap();
+        assert_eq!(cli.editor_file.unwrap(), cur);
+    }
+
+    #[test]
+    fn test_ocean_edit_subcommand_with_path() {
+        let cli = parse_cli_args("ocean", &[String::from("edit"), String::from("Cargo.toml")]);
+        assert!(cli.initial_editor_mode);
+        assert_eq!(cli.editor_file, Some(PathBuf::from("Cargo.toml")));
+    }
+
+    #[test]
+    fn test_backend_cli_flags() {
+        let cli_x11 = parse_cli_args("ocean", &[String::from("--x11")]);
+        assert_eq!(cli_x11.backend.as_deref(), Some("x11"));
+
+        let cli_wl = parse_cli_args("ocean", &[String::from("--wayland")]);
+        assert_eq!(cli_wl.backend.as_deref(), Some("wayland"));
+
+        let cli_be = parse_cli_args("ocean", &[String::from("--backend=x11")]);
+        assert_eq!(cli_be.backend.as_deref(), Some("x11"));
+
+        let cli_be_sep =
+            parse_cli_args("ocean", &[String::from("--backend"), String::from("auto")]);
+        assert_eq!(cli_be_sep.backend.as_deref(), Some("auto"));
+    }
 }

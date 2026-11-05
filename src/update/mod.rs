@@ -66,9 +66,15 @@ pub fn running_version() -> String {
             let pkg_raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !pkg_raw.is_empty() {
                 let clean = pkg_raw
-                    .split('+').next().unwrap_or(&pkg_raw)
-                    .split('~').next().unwrap_or(&pkg_raw)
-                    .split('-').next().unwrap_or(&pkg_raw)
+                    .split('+')
+                    .next()
+                    .unwrap_or(&pkg_raw)
+                    .split('~')
+                    .next()
+                    .unwrap_or(&pkg_raw)
+                    .split('-')
+                    .next()
+                    .unwrap_or(&pkg_raw)
                     .to_string();
                 if is_newer_version(&best_ver, &clean) {
                     best_ver = clean;
@@ -100,9 +106,15 @@ pub fn is_newer_version(current: &str, candidate: &str) -> bool {
     let parse_nums = |s: &str| -> Vec<u64> {
         let clean = s.trim().trim_start_matches(|c| c == 'v' || c == 'V');
         let semver_part = clean
-            .split('+').next().unwrap_or(clean)
-            .split('~').next().unwrap_or(clean)
-            .split('-').next().unwrap_or(clean);
+            .split('+')
+            .next()
+            .unwrap_or(clean)
+            .split('~')
+            .next()
+            .unwrap_or(clean)
+            .split('-')
+            .next()
+            .unwrap_or(clean);
         semver_part
             .split('.')
             .filter_map(|seg| {

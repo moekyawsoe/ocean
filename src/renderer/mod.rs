@@ -190,18 +190,32 @@ impl RenderEngine {
         status_hover_id: Option<usize>,
         cursor_visible_blink: bool,
         window_focused: bool,
+        mut editor: Option<&mut crate::editor::EditorWorkspace>,
+        editor_vp: Option<crate::editor::view::EditorViewport>,
+        split_divider: Option<(f32, f32, f32, f32)>,
+        editor_preedit: Option<&str>,
+        editor_exclusive: bool,
     ) -> (&mut GlyphAtlas, &[QuadInstance]) {
         self.bg_instances.clear();
         self.fg_instances.clear();
         self.overlay_instances.clear();
 
-        // Optional minimal tab bar when > 1 tab (or `window-show-tab-bar = always`)
-        let tab_h = Self::tab_bar_height(config, font_sys, tabs.len());
+        // Optional minimal tab bar when > 1 tab (or `window-show-tab-bar = always`).
+        // In Pure Editor mode the editor owns the full window chrome.
+        let tab_h = if editor_exclusive {
+            0.0
+        } else {
+            Self::tab_bar_height(config, font_sys, tabs.len())
+        };
         if tab_h > 0.0 && !tabs.is_empty() {
             self.emit_tab_bar(config, font_sys, win_w as f32, tab_h, tabs);
         }
 
-        let status_h = Self::status_bar_height(config, font_sys, scale_factor);
+        let status_h = if editor_exclusive {
+            0.0
+        } else {
+            Self::status_bar_height(config, font_sys, scale_factor)
+        };
 
         for pane in panes {
             self.emit_pane(
@@ -212,6 +226,28 @@ impl RenderEngine {
                 cursor_visible_blink,
                 window_focused && pane.is_active,
             );
+        }
+
+        // Integrated Code Editor scene
+        if let (Some(ed), Some(vp)) = (editor.as_mut(), editor_vp) {
+            ed.emit_scene(
+                config,
+                font_sys,
+                &mut self.atlas,
+                &mut self.bg_instances,
+                &mut self.fg_instances,
+                &mut self.overlay_instances,
+                &vp,
+                cursor_visible_blink,
+                editor_preedit,
+            );
+        }
+
+        // Workspace split divider between Editor and Terminal
+        if let Some((dx, dy, dw, dh)) = split_divider {
+            let div_col = config.colors.foreground.to_f32_rgba(0.28);
+            self.fg_instances
+                .push(QuadInstance::solid(dx, dy, dw, dh, div_col));
         }
 
         // Split pane dividers
@@ -2615,6 +2651,11 @@ mod tests {
                 None,
                 true,
                 true,
+                None,
+                None,
+                None,
+                None,
+                false,
             );
             save_scene_png(
                 Path::new(&splits_png),
@@ -2642,6 +2683,11 @@ mod tests {
             None,
             true,
             true,
+            None,
+            None,
+            None,
+            None,
+            false,
         );
         assert!(!instances.is_empty());
 
@@ -2674,6 +2720,11 @@ mod tests {
             None,
             true,
             true,
+            None,
+            None,
+            None,
+            None,
+            false,
         );
         assert!(!instances_h.is_empty());
 
@@ -2750,6 +2801,11 @@ mod tests {
                 None,
                 true,
                 true,
+                None,
+                None,
+                None,
+                None,
+                false,
             );
             save_scene_png(
                 Path::new(&light_png),
@@ -2778,6 +2834,11 @@ mod tests {
                     None,
                     true,
                     true,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
                 );
                 save_scene_png(
                     Path::new(&light_help_png),
@@ -2836,6 +2897,11 @@ mod tests {
             None,
             true,
             true,
+            None,
+            None,
+            None,
+            None,
+            false,
         );
 
         let ch = font_sys.metrics.cell_height;

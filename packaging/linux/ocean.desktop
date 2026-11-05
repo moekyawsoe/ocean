@@ -12,8 +12,16 @@ Categories=System;TerminalEmulator;Utility;
 Keywords=terminal;shell;prompt;command;commandline;myanmar;burmese;wayland;opengl;ghostty;
 StartupNotify=true
 StartupWMClass=ocean
-Actions=new-window;
+Actions=new-window;x11-window;wayland-window;
 
 [Desktop Action new-window]
 Name=New Window
 Exec=ocean
+
+[Desktop Action x11-window]
+Name=New Window (X11 / XWayland)
+Exec=ocean --x11
+
+[Desktop Action wayland-window]
+Name=New Window (Wayland Native)
+Exec=ocean --wayland

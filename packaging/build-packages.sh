@@ -53,6 +53,7 @@ rm -f "$DIST_DIR"/*
 populate_usr_tree() {
   local dest_root="$1"
   install -Dm755 "$BIN_PATH" "$dest_root/usr/bin/ocean"
+  ln -sf ocean "$dest_root/usr/bin/edit"
   install -Dm644 "$ROOT_DIR/packaging/linux/ocean.desktop" "$dest_root/usr/share/applications/ocean.desktop"
   install -Dm644 "$ROOT_DIR/packaging/linux/ocean.metainfo.xml" "$dest_root/usr/share/metainfo/ocean.metainfo.xml"
   install -Dm644 "$ROOT_DIR/assets/icons/ocean.svg" "$dest_root/usr/share/icons/hicolor/scalable/apps/ocean.svg"
@@ -137,6 +138,7 @@ cp -a "${RPM_PAYLOAD}/usr" %{buildroot}/usr
 
 %files
 %attr(0755, root, root) /usr/bin/ocean
+/usr/bin/edit
 /usr/share/applications/ocean.desktop
 /usr/share/metainfo/ocean.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/ocean.svg

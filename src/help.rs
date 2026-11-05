@@ -672,6 +672,18 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "Reload ~/.config/ocean/config live",
             ),
             RawDocItem::KeyValue("Ctrl+Shift+M", "Toggle legacy Zawgyi-One display mode"),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+I / Ctrl+\\",
+                "Toggle built-in editor / editor+terminal split",
+            ),
+            RawDocItem::KeyValue(
+                "editor-keymap = vim",
+                "Enable Normal/Insert/Visual modes (i, Esc, v, V, d/y/c, :w/:q)",
+            ),
+            RawDocItem::KeyValue(
+                "LSP servers on PATH",
+                "HTML/CSS/JSON/YAML/TOML/Shell/Markdown use their language servers when installed",
+            ),
             RawDocItem::KeyValue("Ctrl+Shift+?", "Open or close this Help & Docs dialog"),
             RawDocItem::KeyValue(
                 "e (inside Help) / nano",

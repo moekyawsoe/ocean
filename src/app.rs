@@ -52,6 +52,8 @@ pub struct LaunchOptions {
     pub config_path: Option<PathBuf>,
     pub command: Option<(String, Vec<String>)>,
     pub working_directory: Option<PathBuf>,
+    pub editor_file: Option<PathBuf>,
+    pub initial_editor_mode: bool,
 }
 
 struct GlState {
@@ -119,6 +121,7 @@ pub struct OceanApp {
     pub launch_opts: LaunchOptions,
     pub proxy: EventLoopProxy<AppEvent>,
     pub wakeup_queued: Arc<AtomicBool>,
+    pub editor: crate::editor::EditorWorkspace,
 
     gl_state: Option<GlState>,
     font_sys: Option<FontSystem>,
@@ -148,10 +151,12 @@ pub struct OceanApp {
     pixel_scroll_accum: f64,
     mouse_hidden: bool,
     focused: bool,
+    occluded: bool,
 
     // IME state (Burmese / multilingual input methods)
     ime_preedit: Option<String>,
     last_ime_spot: (u32, u32),
+    ime_allowed: bool,
 
     // Blink & config auto-reload timers
     cursor_blink_on: bool,
@@ -172,12 +177,51 @@ impl OceanApp {
             crate::update::running_version(),
             proxy.clone(),
         );
+
+        let launch_cwd = launch_opts
+            .working_directory
+            .clone()
+            .or_else(|| std::env::current_dir().ok());
+
+        let mut editor = crate::editor::EditorWorkspace::new();
+        editor.vim.enabled = config.editor_keymap == crate::config::EditorKeymap::Vim;
+        if launch_opts.initial_editor_mode {
+            editor.mode = crate::editor::WorkspaceMode::PureEditor;
+            editor.editor_focused = true;
+        }
+        if let Some(ref ed_path) = launch_opts.editor_file {
+            editor.mode = crate::editor::WorkspaceMode::PureEditor;
+            editor.editor_focused = true;
+            if ed_path.is_dir() {
+                editor.open_folder(ed_path);
+            } else {
+                let _ = editor.open_file(ed_path, proxy.clone());
+                let folder = ed_path
+                    .parent()
+                    .and_then(|p| {
+                        if p.as_os_str().is_empty() {
+                            None
+                        } else {
+                            Some(p)
+                        }
+                    })
+                    .or_else(|| launch_cwd.as_deref())
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                editor.open_folder(folder);
+            }
+        } else if let Some(ref cwd) = launch_cwd {
+            editor.open_folder(cwd);
+        } else {
+            editor.open_folder(".");
+        }
+
         Self {
             config,
             base_font_size,
             launch_opts,
             proxy,
             wakeup_queued: Arc::new(AtomicBool::new(false)),
+            editor,
             gl_state: None,
             font_sys: None,
             render_engine: RenderEngine::new(),
@@ -204,8 +248,10 @@ impl OceanApp {
             pixel_scroll_accum: 0.0,
             mouse_hidden: false,
             focused: true,
+            occluded: false,
             ime_preedit: None,
             last_ime_spot: (u32::MAX, u32::MAX),
+            ime_allowed: true,
             cursor_blink_on: true,
             last_blink_toggle: Instant::now(),
             last_config_poll: Instant::now(),
@@ -586,16 +632,42 @@ impl OceanApp {
         let sf = gl_state.window.scale_factor();
         let tab_h = RenderEngine::tab_bar_height(&self.config, font_sys, self.tabs.len());
         let status_h = RenderEngine::status_bar_height(&self.config, font_sys, sf);
-        compute_split_layout(
-            &tab.root,
-            &self.config,
-            font_sys,
-            phys.width,
-            phys.height,
-            sf,
-            tab_h,
-            status_h,
-        )
+
+        match self.editor.mode {
+            crate::editor::WorkspaceMode::PureEditor => (Vec::new(), Vec::new()),
+            crate::editor::WorkspaceMode::Split => {
+                let (_ed_vp, _div, term_rect) = self.editor.compute_layout(
+                    phys.width as f32,
+                    phys.height as f32,
+                    tab_h,
+                    status_h,
+                );
+                if let Some((tx, ty, tw, th)) = term_rect {
+                    crate::split::compute_split_layout_in_rect(
+                        &tab.root,
+                        &self.config,
+                        font_sys,
+                        tx,
+                        ty,
+                        tw,
+                        th,
+                        sf,
+                    )
+                } else {
+                    (Vec::new(), Vec::new())
+                }
+            }
+            crate::editor::WorkspaceMode::PureTerminal => compute_split_layout(
+                &tab.root,
+                &self.config,
+                font_sys,
+                phys.width,
+                phys.height,
+                sf,
+                tab_h,
+                status_h,
+            ),
+        }
     }
 
     fn resize_tab(&mut self, tab_idx: usize) {
@@ -614,16 +686,46 @@ impl OceanApp {
         let ch = font_sys.metrics.cell_height as u16;
 
         let tab = &mut self.tabs[tab_idx];
-        let (layouts, _) = compute_split_layout(
-            &tab.root,
-            &self.config,
-            font_sys,
-            phys.width,
-            phys.height,
-            sf,
-            tab_h,
-            status_h,
-        );
+        let layouts = match self.editor.mode {
+            crate::editor::WorkspaceMode::PureEditor => Vec::new(),
+            crate::editor::WorkspaceMode::Split => {
+                let (_ed_vp, _div, term_rect) = self.editor.compute_layout(
+                    phys.width as f32,
+                    phys.height as f32,
+                    tab_h,
+                    status_h,
+                );
+                if let Some((tx, ty, tw, th)) = term_rect {
+                    let (layouts, _) = crate::split::compute_split_layout_in_rect(
+                        &tab.root,
+                        &self.config,
+                        font_sys,
+                        tx,
+                        ty,
+                        tw,
+                        th,
+                        sf,
+                    );
+                    layouts
+                } else {
+                    Vec::new()
+                }
+            }
+            crate::editor::WorkspaceMode::PureTerminal => {
+                let (layouts, _) = compute_split_layout(
+                    &tab.root,
+                    &self.config,
+                    font_sys,
+                    phys.width,
+                    phys.height,
+                    sf,
+                    tab_h,
+                    status_h,
+                );
+                layouts
+            }
+        };
+
         for layout in layouts {
             if let Some(pane) = tab.pane_by_id_mut(layout.pane_id) {
                 pane.resize(layout.cols, layout.rows, cw, ch);
@@ -739,6 +841,9 @@ impl OceanApp {
     }
 
     fn request_redraw(&self) {
+        if self.occluded {
+            return;
+        }
         if let Some(gl_state) = &self.gl_state {
             gl_state.window.request_redraw();
         }
@@ -997,6 +1102,8 @@ impl OceanApp {
         let new_cfg = Config::load(self.launch_opts.config_path.as_deref());
         self.base_font_size = new_cfg.font_size;
         self.config = new_cfg;
+        self.editor.vim.enabled = self.config.editor_keymap == crate::config::EditorKeymap::Vim;
+        self.editor.vim.reset_to_normal();
         if let (Some(gl_state), Some(font_sys)) = (&self.gl_state, &mut self.font_sys) {
             let sf = gl_state.window.scale_factor();
             font_sys.update_size_or_config(&self.config, sf, true);
@@ -1272,6 +1379,52 @@ impl OceanApp {
             Action::Quit => {
                 event_loop.exit();
             }
+            Action::ToggleEditor => {
+                self.editor.mode = match self.editor.mode {
+                    crate::editor::WorkspaceMode::PureEditor => {
+                        crate::editor::WorkspaceMode::PureTerminal
+                    }
+                    _ => crate::editor::WorkspaceMode::PureEditor,
+                };
+                if self.editor.is_active() && !self.editor.explorer.is_open() {
+                    let ws_dir = self
+                        .inherited_cwd(false)
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    self.editor.open_folder(&ws_dir);
+                }
+                if self.editor.is_active() && self.editor.documents.is_empty() {
+                    let _ = self
+                        .editor
+                        .open_file(std::path::Path::new("untitled.txt"), self.proxy.clone());
+                }
+                self.editor.editor_focused = self.editor.is_active();
+                self.resize_all_tabs();
+                self.sync_window_title();
+                self.request_redraw();
+            }
+            Action::ToggleSplitMode => {
+                self.editor.mode = match self.editor.mode {
+                    crate::editor::WorkspaceMode::Split => {
+                        crate::editor::WorkspaceMode::PureTerminal
+                    }
+                    _ => crate::editor::WorkspaceMode::Split,
+                };
+                if self.editor.is_active() && !self.editor.explorer.is_open() {
+                    let ws_dir = self
+                        .inherited_cwd(false)
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    self.editor.open_folder(&ws_dir);
+                }
+                if self.editor.is_active() && self.editor.documents.is_empty() {
+                    let _ = self
+                        .editor
+                        .open_file(std::path::Path::new("untitled.txt"), self.proxy.clone());
+                }
+                self.editor.editor_focused = self.editor.is_active();
+                self.resize_all_tabs();
+                self.sync_window_title();
+                self.request_redraw();
+            }
             Action::SendText(bytes) => {
                 if let Some(s) = self.active_session() {
                     s.write_bytes(bytes);
@@ -1289,7 +1442,24 @@ impl OceanApp {
         self.last_blink_toggle = Instant::now();
     }
 
+    fn sync_ime_policy(&mut self) {
+        let editor_owns_input = self.editor.is_active() && self.editor.editor_focused;
+        let allowed = !editor_owns_input || self.editor.accepts_text_input();
+        if self.ime_allowed == allowed {
+            return;
+        }
+        self.ime_allowed = allowed;
+        if let Some(gl_state) = &self.gl_state {
+            gl_state.window.set_ime_allowed(allowed);
+        }
+    }
+
     fn render_frame(&mut self) {
+        if self.occluded {
+            return;
+        }
+        self.sync_ime_policy();
+        let (layouts, dividers) = self.active_tab_layout();
         let (Some(gl_state), Some(font_sys)) = (&mut self.gl_state, &mut self.font_sys) else {
             return;
         };
@@ -1302,18 +1472,26 @@ impl OceanApp {
             return;
         }
         let sf = gl_state.window.scale_factor();
-        let tab_h = RenderEngine::tab_bar_height(&self.config, font_sys, self.tabs.len());
-        let status_h = RenderEngine::status_bar_height(&self.config, font_sys, sf);
-        let (layouts, dividers) = compute_split_layout(
-            &tab.root,
-            &self.config,
-            font_sys,
-            phys.width,
-            phys.height,
-            sf,
-            tab_h,
-            status_h,
-        );
+        let editor_exclusive = self.editor.mode == crate::editor::WorkspaceMode::PureEditor;
+        let tab_h = if editor_exclusive {
+            0.0
+        } else {
+            RenderEngine::tab_bar_height(&self.config, font_sys, self.tabs.len())
+        };
+        let status_h = if editor_exclusive {
+            0.0
+        } else {
+            RenderEngine::status_bar_height(&self.config, font_sys, sf)
+        };
+
+        let (ed_vp, split_div) = if self.editor.is_active() {
+            let (vp, div, _) =
+                self.editor
+                    .compute_layout(phys.width as f32, phys.height as f32, tab_h, status_h);
+            (Some(vp), div)
+        } else {
+            (None, None)
+        };
 
         if self.snapshot_bufs.len() < layouts.len() {
             self.snapshot_bufs
@@ -1338,6 +1516,55 @@ impl OceanApp {
                         .max(0.0) as u32;
                     active_ime_px = Some((cx, cy));
                 }
+            }
+        }
+
+        // Anchor IME to editor cursor when editor is active and focused
+        if self.editor.is_active() && self.editor.editor_focused {
+            if let Some(ed_viewport) = ed_vp {
+                let gutter_digits = (self.editor.active_doc().buffer.len_lines() + 1)
+                    .to_string()
+                    .len()
+                    .max(3);
+                let line_h = font_sys.metrics.cell_height;
+                let gutter_w = (gutter_digits as f32 + 3.0) * font_sys.metrics.cell_width;
+                let (rel_cx, rel_cy) = self
+                    .editor
+                    .active_doc()
+                    .cursor_visual_pos(font_sys, gutter_w);
+                let ed_tab_h = crate::editor::EditorWorkspace::editor_tab_height(line_h);
+                let crumb_h = self.editor.breadcrumb_height(line_h);
+                let activity_w = if self.editor.activity_bar_visible {
+                    44.0
+                } else {
+                    0.0
+                };
+                let panel_open = self.editor.explorer.visible
+                    && (self.editor.active_panel == crate::editor::SidebarPanel::Problems
+                        || self.editor.explorer.is_open());
+                let sidebar_w = if panel_open {
+                    if self.editor.active_panel == crate::editor::SidebarPanel::Problems {
+                        self.editor
+                            .explorer
+                            .width
+                            .max(230.0)
+                            .min((ed_viewport.w - 160.0).max(80.0))
+                    } else {
+                        self.editor
+                            .explorer
+                            .width
+                            .min(ed_viewport.w - 100.0)
+                            .max(80.0)
+                    }
+                } else {
+                    0.0
+                };
+                let code_x = ed_viewport.x + activity_w + sidebar_w;
+                let abs_cx = (code_x + rel_cx).round().max(0.0) as u32;
+                let abs_cy = (ed_viewport.y + ed_tab_h + crumb_h + rel_cy)
+                    .round()
+                    .max(0.0) as u32;
+                active_ime_px = Some((abs_cx, abs_cy));
             }
         }
 
@@ -1389,6 +1616,18 @@ impl OceanApp {
             true
         };
 
+        let ed_ref = if self.editor.is_active() {
+            Some(&mut self.editor)
+        } else {
+            None
+        };
+
+        let tabs_for_scene = if editor_exclusive {
+            &tab_titles[..0]
+        } else {
+            &tab_titles[..]
+        };
+
         let (atlas, instances) = self.render_engine.build_scene(
             &self.config,
             font_sys,
@@ -1397,13 +1636,18 @@ impl OceanApp {
             phys.width,
             phys.height,
             sf,
-            &tab_titles,
+            tabs_for_scene,
             self.context_menu.as_ref(),
             self.help_dialog.as_ref(),
             self.available_update.as_ref(),
             self.status_hover.hovered_id,
             blink_visible,
             self.focused,
+            ed_ref,
+            ed_vp,
+            split_div,
+            self.ime_preedit.as_deref(),
+            editor_exclusive,
         );
 
         gl_state.renderer.draw(
@@ -1425,6 +1669,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
         if let StartCause::ResumeTimeReached { .. } = cause
             && self.config.cursor_blink
             && self.focused
+            && !self.occluded
         {
             self.cursor_blink_on = !self.cursor_blink_on;
             self.last_blink_toggle = Instant::now();
@@ -1440,12 +1685,20 @@ impl ApplicationHandler<AppEvent> for OceanApp {
         }
     }
 
+    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.occluded = true;
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.gl_state.is_none()
-            && let Err(err) = self.init_window_and_gl(event_loop)
-        {
-            eprintln!("ocean fatal error: {err}");
-            event_loop.exit();
+        self.occluded = false;
+        if self.gl_state.is_none() {
+            if let Err(err) = self.init_window_and_gl(event_loop) {
+                eprintln!("ocean fatal error: {err}");
+                event_loop.exit();
+            }
+        } else {
+            self.reset_cursor_blink();
+            self.request_redraw();
         }
     }
 
@@ -1453,6 +1706,11 @@ impl ApplicationHandler<AppEvent> for OceanApp {
         match event {
             AppEvent::Wakeup => {
                 self.wakeup_queued.store(false, Ordering::Release);
+                if let Some(font_sys) = &mut self.font_sys {
+                    if self.editor.poll_events(font_sys) {
+                        self.request_redraw();
+                    }
+                }
                 self.request_redraw();
             }
             AppEvent::TitleChanged(pane_id, maybe_title) => {
@@ -1599,6 +1857,22 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         if self.config.mouse_hide_while_typing {
                             self.set_mouse_hidden(true);
                         }
+
+                        // The editor owns text input whenever it has focus.
+                        if self.editor.is_active()
+                            && (self.editor.editor_focused
+                                || self.editor.mode == crate::editor::WorkspaceMode::PureEditor)
+                        {
+                            if self.editor.accepts_text_input()
+                                && let Some(font_sys) = &mut self.font_sys
+                            {
+                                self.editor.insert_ime_commit(&text, font_sys);
+                            }
+                            self.reset_cursor_blink();
+                            self.request_redraw();
+                            return;
+                        }
+
                         if let Some(session) = self.active_session() {
                             session.clear_selection();
                             session.scroll(Scroll::Bottom);
@@ -1716,6 +1990,50 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     }
                 }
 
+                // Check global workspace toggle & window lifecycle keybinds first
+                if let Some(action) =
+                    match_keybind(&self.config.keybinds, &event.logical_key, self.modifiers)
+                        .cloned()
+                {
+                    if matches!(
+                        action,
+                        Action::ToggleEditor
+                            | Action::ToggleSplitMode
+                            | Action::ToggleFullscreen
+                            | Action::Quit
+                            | Action::ReloadConfig
+                    ) {
+                        self.close_context_menu();
+                        self.execute_action(action, event_loop);
+                        return;
+                    }
+                }
+
+                // If code editor is active and focused, route keys to the editor
+                if self.editor.is_active()
+                    && (self.editor.editor_focused
+                        || self.editor.mode == crate::editor::WorkspaceMode::PureEditor)
+                {
+                    let ws_dir = self
+                        .inherited_cwd(false)
+                        .unwrap_or_else(|| std::path::PathBuf::from("."));
+                    if let Some(font_sys) = &mut self.font_sys {
+                        if self.editor.handle_key(
+                            &event,
+                            self.modifiers,
+                            font_sys,
+                            &mut self.clipboard,
+                            &ws_dir,
+                            self.proxy.clone(),
+                        ) {
+                            self.reset_cursor_blink();
+                            self.sync_ime_policy();
+                            self.request_redraw();
+                            return;
+                        }
+                    }
+                }
+
                 // Check configured Ghostty-style keybinds
                 if let Some(action) =
                     match_keybind(&self.config.keybinds, &event.logical_key, self.modifiers)
@@ -1734,6 +2052,11 @@ impl ApplicationHandler<AppEvent> for OceanApp {
 
                 // Do not emit raw key text while an IME preedit composition is actively open
                 if self.ime_preedit.is_some() {
+                    return;
+                }
+
+                // In Pure Editor mode the terminal pane is hidden; never leak keys into it.
+                if self.editor.mode == crate::editor::WorkspaceMode::PureEditor {
                     return;
                 }
 
@@ -1867,6 +2190,120 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     return;
                 }
 
+                // Interactive editor/terminal split divider dragging
+                if self.editor.dragging_split_divider {
+                    let sf = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    let (avail_w, avail_h) = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| {
+                            let sz = g.window.inner_size();
+                            (sz.width as f32, sz.height as f32)
+                        })
+                        .unwrap_or((800.0, 600.0));
+                    let tab_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
+                        .unwrap_or(0.0);
+                    let status_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
+                        .unwrap_or(0.0);
+
+                    match self.editor.split_axis {
+                        SplitAxis::Vertical => {
+                            let total_h = (avail_h - tab_h - status_h - 4.0).max(10.0);
+                            let rel_y = (py - tab_h).clamp(60.0, total_h - 60.0);
+                            self.editor.split_ratio = (rel_y / total_h).clamp(0.15, 0.85);
+                        }
+                        SplitAxis::Horizontal => {
+                            let total_w = (avail_w - 4.0).max(10.0);
+                            let rel_x = px.clamp(60.0, total_w - 60.0);
+                            self.editor.split_ratio = (rel_x / total_w).clamp(0.15, 0.85);
+                        }
+                    }
+                    self.resize_all_tabs();
+                    self.request_redraw();
+                    return;
+                }
+
+                // Interactive file explorer sidebar divider dragging
+                if self.editor.explorer.dragging_divider {
+                    let (win_w, win_h) = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| {
+                            let sz = g.window.inner_size();
+                            (sz.width as f32, sz.height as f32)
+                        })
+                        .unwrap_or((800.0, 600.0));
+                    let tab_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
+                        .unwrap_or(0.0);
+                    let (ed_vp, _, _) = self.editor.compute_layout(win_w, win_h, tab_h, 0.0);
+                    let new_w = (px - ed_vp.x).clamp(80.0, (ed_vp.w - 100.0).max(80.0));
+                    self.editor.explorer.width = new_w;
+                    self.request_redraw();
+                    return;
+                }
+
+                // Editor mouse selection drag or scrollbar drag / hover
+                if self.editor.is_active() && self.editor.editor_focused {
+                    let (win_w, win_h) = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| {
+                            let sz = g.window.inner_size();
+                            (sz.width as f32, sz.height as f32)
+                        })
+                        .unwrap_or((800.0, 600.0));
+                    let tab_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
+                        .unwrap_or(0.0);
+                    let status_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::status_bar_height(&self.config, fs, 1.0))
+                        .unwrap_or(0.0);
+                    let (ed_vp, _, _) = self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+
+                    if self.editor.dragging_scrollbar {
+                        if let Some(font_sys) = &mut self.font_sys {
+                            if self
+                                .editor
+                                .handle_scrollbar_drag(py, &ed_vp, tab_h, font_sys)
+                            {
+                                self.request_redraw();
+                            }
+                            return;
+                        }
+                    } else if self.mouse_left_down {
+                        if let Some(font_sys) = &mut self.font_sys {
+                            self.editor
+                                .handle_mouse_drag(px, py, &ed_vp, tab_h, font_sys);
+                            self.request_redraw();
+                            return;
+                        }
+                    } else if let Some(font_sys) = &mut self.font_sys {
+                        if self
+                            .editor
+                            .update_scrollbar_hover(px, py, &ed_vp, tab_h, font_sys)
+                        {
+                            self.request_redraw();
+                        }
+                    }
+                }
+
                 let (layouts, dividers) = self.active_tab_layout();
 
                 // 3. Active mouse drag (selection or PTY mouse motion)
@@ -1910,7 +2347,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 }
 
                 // 4. Passive PTY mouse-motion reporting & cursor icon updates
-                let Some((sf, win_w, tab_h, cw, ch)) = self
+                let Some((sf, win_w, win_h, tab_h, cw, ch)) = self
                     .gl_state
                     .as_ref()
                     .zip(self.font_sys.as_ref())
@@ -1918,6 +2355,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         (
                             gs.window.scale_factor() as f32,
                             gs.window.inner_size().width as f32,
+                            gs.window.inner_size().height as f32,
                             RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()),
                             fs.metrics.cell_width,
                             fs.metrics.cell_height,
@@ -1951,6 +2389,56 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     });
                     return;
                 }
+
+                if self.editor.is_active() {
+                    let (_ed_vp, split_div, _) =
+                        self.editor.compute_layout(win_w, win_h, tab_h, 0.0);
+                    if let Some((sx, sy, sw, sh)) = split_div {
+                        let slop = 4.0;
+                        if px >= sx - slop
+                            && px <= sx + sw + slop
+                            && py >= sy - slop
+                            && py <= sy + sh + slop
+                        {
+                            self.set_cursor_icon(match self.editor.split_axis {
+                                SplitAxis::Vertical => CursorIcon::RowResize,
+                                SplitAxis::Horizontal => CursorIcon::ColResize,
+                            });
+                            return;
+                        }
+                    }
+
+                    if self.editor.explorer.visible && self.editor.explorer.is_open() {
+                        let sw = self.editor.explorer.width.min(_ed_vp.w - 100.0).max(80.0);
+                        let div_x = _ed_vp.x + sw;
+                        if (px - div_x).abs() <= 4.0 && py >= _ed_vp.y && py <= _ed_vp.y + _ed_vp.h
+                        {
+                            self.set_cursor_icon(CursorIcon::ColResize);
+                            return;
+                        }
+                        if px >= _ed_vp.x
+                            && px < div_x
+                            && py >= _ed_vp.y
+                            && py <= _ed_vp.y + _ed_vp.h
+                        {
+                            self.set_cursor_icon(CursorIcon::Pointer);
+                            if let Some(font_sys) = &self.font_sys {
+                                let line_h = font_sys.metrics.cell_height;
+                                let header_h = (line_h + 6.0).round();
+                                let item_h = (line_h + 3.0).round();
+                                self.editor
+                                    .explorer
+                                    .update_hover(px, py, _ed_vp.x, _ed_vp.y, header_h, item_h);
+                                self.request_redraw();
+                            }
+                            return;
+                        } else if self.editor.explorer.hovered_idx.is_some() {
+                            self.editor.explorer.hovered_idx = None;
+                            self.request_redraw();
+                        }
+                    }
+                }
+
                 self.set_cursor_icon(CursorIcon::Text);
 
                 if let Some(layout) = pane_at_point(&layouts, px, py)
@@ -1981,11 +2469,13 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 let px = self.cursor_pos.x as f32;
                 let py = self.cursor_pos.y as f32;
 
-                if state == ElementState::Released
-                    && button == MouseButton::Left
-                    && self.dragging_divider.take().is_some()
-                {
-                    return;
+                if state == ElementState::Released && button == MouseButton::Left {
+                    self.editor.dragging_split_divider = false;
+                    self.editor.explorer.dragging_divider = false;
+                    self.editor.dragging_scrollbar = false;
+                    if self.dragging_divider.take().is_some() {
+                        return;
+                    }
                 }
 
                 // Clicks on the Neovim-style bottom shortcut & mode status bar
@@ -2251,6 +2741,81 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     return;
                 }
 
+                // Editor viewport & split divider mouse interactions
+                if self.editor.is_active() {
+                    let win_w = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.inner_size().width as f32)
+                        .unwrap_or(800.0);
+                    let win_h = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.inner_size().height as f32)
+                        .unwrap_or(600.0);
+                    let sf = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    let status_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
+                        .unwrap_or(0.0);
+                    let (ed_vp, split_div, _) =
+                        self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+
+                    // Check click on editor/terminal split divider in Split mode
+                    if let Some((sx, sy, sw, sh)) = split_div {
+                        let slop = 4.0;
+                        if state == ElementState::Pressed
+                            && button == MouseButton::Left
+                            && px >= sx - slop
+                            && px <= sx + sw + slop
+                            && py >= sy - slop
+                            && py <= sy + sh + slop
+                        {
+                            self.editor.dragging_split_divider = true;
+                            return;
+                        }
+                    }
+
+                    // Check click inside editor viewport
+                    if px >= ed_vp.x
+                        && px <= ed_vp.x + ed_vp.w
+                        && py >= ed_vp.y
+                        && py <= ed_vp.y + ed_vp.h
+                    {
+                        self.editor.editor_focused = true;
+                        self.sync_ime_policy();
+                        if state == ElementState::Pressed {
+                            if button == MouseButton::Right {
+                                self.open_context_menu(px, py, false, false);
+                                return;
+                            }
+                            if let Some(font_sys) = &mut self.font_sys {
+                                self.editor.handle_mouse_click(
+                                    button,
+                                    px,
+                                    py,
+                                    &ed_vp,
+                                    tab_h,
+                                    font_sys,
+                                    self.modifiers,
+                                    self.proxy.clone(),
+                                );
+                            }
+                            self.reset_cursor_blink();
+                            self.request_redraw();
+                            return;
+                        }
+                    } else if state == ElementState::Pressed {
+                        self.editor.editor_focused = false;
+                        self.sync_ime_policy();
+                    }
+                }
+
                 // 5. Split divider drag-to-resize
                 let (layouts, dividers) = self.active_tab_layout();
                 if state == ElementState::Pressed
@@ -2401,6 +2966,55 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     self.request_redraw();
                 }
 
+                let px = self.cursor_pos.x as f32;
+                let py = self.cursor_pos.y as f32;
+
+                // Priority 1: Code Editor (when active and cursor is over editor viewport)
+                if self.editor.is_active() {
+                    let win_w = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.inner_size().width as f32)
+                        .unwrap_or(800.0);
+                    let win_h = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.inner_size().height as f32)
+                        .unwrap_or(600.0);
+                    let sf = self
+                        .gl_state
+                        .as_ref()
+                        .map(|g| g.window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    let tab_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
+                        .unwrap_or(0.0);
+                    let status_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
+                        .unwrap_or(0.0);
+                    let (ed_vp, _, _) = self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+                    if px >= ed_vp.x
+                        && px <= ed_vp.x + ed_vp.w
+                        && py >= ed_vp.y
+                        && py <= ed_vp.y + ed_vp.h
+                    {
+                        if let Some(font_sys) = &mut self.font_sys {
+                            let multiplier = self.config.mouse_scroll_multiplier;
+                            if self
+                                .editor
+                                .handle_scroll(delta, font_sys, px, py, &ed_vp, multiplier)
+                            {
+                                self.request_redraw();
+                            }
+                            return;
+                        }
+                    }
+                }
+
                 let cell_h = self
                     .font_sys
                     .as_ref()
@@ -2451,8 +3065,6 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     return;
                 }
 
-                let px = self.cursor_pos.x as f32;
-                let py = self.cursor_pos.y as f32;
                 let (layouts, _) = self.active_tab_layout();
                 let Some(layout) = pane_at_point(&layouts, px, py).copied() else {
                     return;
@@ -2483,6 +3095,13 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     self.request_redraw();
                 }
             }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if !occluded {
+                    self.reset_cursor_blink();
+                    self.request_redraw();
+                }
+            }
             WindowEvent::RedrawRequested => {
                 self.render_frame();
             }
@@ -2491,7 +3110,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.config.cursor_blink && self.focused {
+        if self.config.cursor_blink && self.focused && !self.occluded {
             let next = self.last_blink_toggle + Duration::from_millis(530);
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
         } else {

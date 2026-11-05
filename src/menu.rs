@@ -151,6 +151,18 @@ impl ContextMenu {
                 action: Action::NewTab,
                 enabled: true,
             }),
+            MenuEntry::Item(MenuItem {
+                label: "Toggle Code Editor",
+                shortcut: sc(Action::ToggleEditor, "Ctrl+Shift+I"),
+                action: Action::ToggleEditor,
+                enabled: true,
+            }),
+            MenuEntry::Item(MenuItem {
+                label: "Toggle Split Mode",
+                shortcut: sc(Action::ToggleSplitMode, "Ctrl+\\"),
+                action: Action::ToggleSplitMode,
+                enabled: true,
+            }),
             MenuEntry::Separator,
             MenuEntry::ThemeSubmenu {
                 label: "Switch Theme",
@@ -801,6 +813,8 @@ impl ContextMenu {
             "=" | "+" => Some(Action::EqualizeSplits),
             "n" | "N" => Some(Action::NewTab),
             "b" | "B" => Some(Action::ToggleStatusBar),
+            "i" | "I" => Some(Action::ToggleEditor),
+            "\\" | "|" => Some(Action::ToggleSplitMode),
             "?" | "/" => Some(Action::ShowHelp),
             "o" | "O" => Some(Action::EditConfig),
             "u" | "U" => Some(Action::TriggerUpdate),

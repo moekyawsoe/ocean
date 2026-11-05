@@ -57,11 +57,56 @@ pub enum TabBarMode {
 
 pub const STARTER_CONFIG: &str = include_str!("../../config.example");
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackendMode {
+    #[default]
+    Auto,
+    Wayland,
+    X11,
+}
+
+impl std::str::FromStr for BackendMode {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "x11" | "xwayland" | "x" => Ok(Self::X11),
+            "wayland" | "wayland-native" | "wl" => Ok(Self::Wayland),
+            "auto" | "default" => Ok(Self::Auto),
+            _ => Err(()),
+        }
+    }
+}
+
+impl std::fmt::Display for BackendMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::Wayland => write!(f, "wayland"),
+            Self::X11 => write!(f, "x11"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZawgyiMode {
     Off,
     Auto,
     Force,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorKeymap {
+    Modeless,
+    Vim,
+}
+
+impl EditorKeymap {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Modeless => "modeless",
+            Self::Vim => "vim",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +150,8 @@ pub struct Config {
     pub window_vsync: bool,
     pub window_show_tab_bar: TabBarMode,
     pub window_show_status_bar: bool,
+    pub editor_keymap: EditorKeymap,
+    pub backend: BackendMode,
 
     // Terminal / Shell / Mouse / Clipboard
     pub command: Option<String>,
@@ -167,6 +214,8 @@ impl Default for Config {
             window_vsync: true,
             window_show_tab_bar: TabBarMode::Auto,
             window_show_status_bar: true,
+            editor_keymap: EditorKeymap::Modeless,
+            backend: BackendMode::Auto,
 
             command: None,
             working_directory: None,
@@ -683,6 +732,33 @@ impl Config {
                 }
                 _ => self.warn(line_no, key, val),
             },
+            "editor-keymap" | "editor-mode" | "editor-editing-mode" => {
+                match val.to_ascii_lowercase().as_str() {
+                    "modeless" | "default" | "standard" => {
+                        self.editor_keymap = EditorKeymap::Modeless;
+                    }
+                    "vim" | "modal" | "vi" => self.editor_keymap = EditorKeymap::Vim,
+                    _ => self.warn(line_no, key, val),
+                }
+            }
+            "backend" | "linux-display-server" | "display-server" => {
+                if let Ok(bm) = val.parse::<BackendMode>() {
+                    self.backend = bm;
+                } else {
+                    self.warn(line_no, key, val);
+                }
+            }
+            "enable-wayland" => {
+                if let Some(b) = parse_bool(val) {
+                    self.backend = if b {
+                        BackendMode::Wayland
+                    } else {
+                        BackendMode::X11
+                    };
+                } else {
+                    self.warn(line_no, key, val);
+                }
+            }
             "auto-update-check" | "update-check" | "check-update" => {
                 match crate::update::UpdateCheckMode::parse(val) {
                     Some(m) => self.auto_update_check = m,
@@ -846,6 +922,11 @@ impl Config {
             self.window_show_status_bar
         ));
         out.push_str(&format!(
+            "editor-keymap = {}\n",
+            self.editor_keymap.as_str()
+        ));
+        out.push_str(&format!("backend = {}\n", self.backend));
+        out.push_str(&format!(
             "auto-update-check = {}\n",
             self.auto_update_check.as_str()
         ));
@@ -951,6 +1032,17 @@ mod tests {
         assert_eq!(cfg.window_padding_x, (12, 14));
         assert_eq!(cfg.window_padding_y, (10, 10));
         assert_eq!(cfg.myanmar_zawgyi, ZawgyiMode::Auto);
+    }
+
+    #[test]
+    fn parses_editor_keymap() {
+        let vim = Config::load_from_str("editor-keymap = vim");
+        assert!(vim.warnings.is_empty(), "{:?}", vim.warnings);
+        assert_eq!(vim.editor_keymap, EditorKeymap::Vim);
+
+        let modeless = Config::load_from_str("editor-keymap = modeless");
+        assert!(modeless.warnings.is_empty(), "{:?}", modeless.warnings);
+        assert_eq!(modeless.editor_keymap, EditorKeymap::Modeless);
     }
 
     #[test]
@@ -1070,5 +1162,29 @@ mod tests {
         assert_eq!(text2, "theme = nord\n");
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn parses_backend_modes_correctly() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.backend, BackendMode::Auto);
+
+        cfg.apply_cli_kv("backend", "x11");
+        assert_eq!(cfg.backend, BackendMode::X11);
+
+        cfg.apply_cli_kv("backend", "wayland");
+        assert_eq!(cfg.backend, BackendMode::Wayland);
+
+        cfg.apply_cli_kv("linux-display-server", "xwayland");
+        assert_eq!(cfg.backend, BackendMode::X11);
+
+        cfg.apply_cli_kv("enable-wayland", "false");
+        assert_eq!(cfg.backend, BackendMode::X11);
+
+        cfg.apply_cli_kv("enable-wayland", "true");
+        assert_eq!(cfg.backend, BackendMode::Wayland);
+
+        cfg.apply_cli_kv("backend", "auto");
+        assert_eq!(cfg.backend, BackendMode::Auto);
     }
 }

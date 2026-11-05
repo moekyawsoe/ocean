@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ocean Code Editor — Documentation | GPU Editor with LSP, WASM Plugins &amp; Myanmar Shaping</title>
+  <meta
+    name="description"
+    content="Complete documentation for Ocean's built-in GPU code editor: workspace modes, modeless shortcuts, file explorer, fuzzy command palette, LSP, syntax highlighting, Myanmar grapheme editing, and sandboxed WASM plugins."
+  />
+  <link rel="icon" type="image/svg+xml" href="./assets/ocean.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="./index.html" class="brand">
+        <img src="./assets/ocean.svg" alt="Ocean Terminal Logo" class="brand-logo" />
+        <span>Ocean</span>
+        <span class="brand-badge">Rust + OpenGL</span>
+      </a>
+
+      <nav class="main-nav" aria-label="Primary Navigation">
+        <a href="./index.html#features">Features</a>
+        <a href="./index.html#myanmar">Myanmar</a>
+        <a href="./editor.html" class="is-active" aria-current="page">Editor</a>
+        <a href="./index.html#download">Download</a>
+        <a href="./index.html#usage">Usage</a>
+        <a href="./index.html#config">Config</a>
+        <a href="./index.html#shortcuts">Shortcuts</a>
+      </nav>
+
+      <div class="header-actions">
+        <a
+          href="https://github.com/moekyawsoe/ocean"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-secondary btn-sm"
+        >
+          GitHub
+        </a>
+        <a href="./index.html#download" class="btn btn-primary btn-sm">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top" class="rail-shell">
+    <section class="docs-hero section-band">
+      <div class="docs-breadcrumb">
+        <a href="./index.html">Home</a><span>/</span>Documentation<span>/</span>Code Editor
+      </div>
+      <div class="section-eyebrow">Built-in IDE</div>
+      <h1>A GPU code editor that lives <em>inside</em> your terminal.</h1>
+      <p class="lead">
+        Ocean ships a native, modeless code editor rendered directly on its instanced OpenGL pipeline — no TUI
+        abstractions, no external window, no Electron. Edit files at terminal speed, split them next to your shell, and
+        keep full Myanmar/Burmese shaping while you type.
+      </p>
+      <div class="docs-meta-row">
+        <span class="docs-meta-pill">ropey B-tree buffer</span>
+        <span class="docs-meta-pill">Asynchronous LSP</span>
+        <span class="docs-meta-pill">Fuzzy command palette</span>
+        <span class="docs-meta-pill">Sandboxed WASM plugins</span>
+        <span class="docs-meta-pill">Myanmar grapheme clusters</span>
+      </div>
+      <div class="hero-cta-row">
+        <a href="./index.html#download" class="btn btn-primary">Download Ocean</a>
+        <a href="./index.html#shortcuts" class="btn btn-secondary">Terminal Shortcuts</a>
+        <a
+          href="https://github.com/moekyawsoe/ocean"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-secondary"
+        >
+          Source on GitHub
+        </a>
+      </div>
+    </section>
+
+    <div class="docs-layout">
+      <aside class="docs-sidebar" aria-label="Documentation contents">
+        <div class="docs-sidebar-label">On this page</div>
+        <nav class="docs-nav">
+          <a href="#overview">Overview</a>
+          <a href="#launching">Launching the editor</a>
+          <a href="#modes">Workspace modes</a>
+          <a href="#shortcuts">Editor shortcuts</a>
+          <a href="#vim">Vim keybindings</a>
+          <a href="#interface">Interface</a>
+          <a href="#explorer">File explorer</a>
+          <a href="#palette">Command palette</a>
+          <a href="#languages">Languages &amp; LSP</a>
+          <a href="#myanmar">Myanmar editing</a>
+          <a href="#plugins">WASM plugins</a>
+          <a href="#mouse">Mouse &amp; navigation</a>
+          <a href="#customize">Customization</a>
+        </nav>
+      </aside>
+
+      <div class="docs-body">
+        <section class="docs-section" id="overview">
+          <h2>Overview</h2>
+          <p>
+            The editor is part of the same binary as the terminal. It reuses Ocean's OpenGL renderer, font system, theme
+            palette, and event loop, so switching between a shell and a source file is instant — no new process, no
+            second window, and no separate configuration.
+          </p>
+          <ul>
+            <li><strong>Native GPU pipeline.</strong> Cells, glyphs, gutters, tabs, popups, and squiggles are drawn through Ocean's instanced <code>glow</code>/<code>glutin</code> renderer.</li>
+            <li><strong>Rope-backed buffers.</strong> <code>ropey</code> keeps edits at O(log N), so multi-megabyte files stay responsive, with a transaction-based undo/redo stack that restores cursor positions.</li>
+            <li><strong>Modeless editing.</strong> Familiar developer bindings — <kbd>Ctrl</kbd>+<kbd>S</kbd>, <kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd>, <kbd>Ctrl</kbd>+<kbd>Z</kbd> — with no modal state to think about.</li>
+            <li><strong>Cluster-aware text.</strong> Cursor movement, selection, and deletion operate on shaped grapheme clusters, which keeps Burmese syllables intact.</li>
+            <li><strong>Built-in tooling.</strong> File explorer, fuzzy file/command palette, find bar, LSP completion and hover, diagnostics, and Extism plugins.</li>
+          </ul>
+          <div class="docs-note">
+            <strong>Tip:</strong> The editor follows the active Ocean theme and font settings. Switch themes live with
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Switch Theme</strong> and the editor recolors immediately.
+          </div>
+        </section>
+
+        <section class="docs-section" id="launching">
+          <h2>Launching the editor</h2>
+          <p>
+            There are two entry paths: launch it directly as an editor, or toggle it on top of a running terminal session.
+          </p>
+
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Entry point</th><th>How</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>ocean edit [PATH]</code></td><td>Open a file, or a folder as the workspace. No path opens the current directory.</td></tr>
+                <tr><td><code>edit [PATH]</code></td><td>Standalone launcher installed as an <code>ocean</code> symlink by the <code>.deb</code> and <code>.rpm</code> packages.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle Pure Editor mode (Mode C) from a running session.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B): editor on top, terminal on the bottom.</td></tr>
+                <tr><td>Context Menu</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Toggle Code Editor</strong> (mnemonic <kbd>i</kbd>).</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>Launch examples</span>
+              <button type="button" class="copy-btn" data-copy-target="docs-launch">Copy</button>
+            </div>
+            <pre id="docs-launch"><span class="tok-comment"># Open a file directly</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> src/main.rs
+
+<span class="tok-comment"># Open a folder as the workspace (enables Ctrl+P file finder and Ctrl+B explorer)</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> .
+
+<span class="tok-comment"># Standalone launcher installed by the .deb / .rpm packages</span>
+<span class="tok-cmd">edit</span> src/main.rs
+
+<span class="tok-comment"># Start a shell in the parent terminal tab while editing (Mode B)</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> .</pre>
+          </div>
+
+          <div class="docs-note">
+            When Ocean starts in editor mode, typing <code>ocean edit</code> or <code>edit</code> with no argument opens
+            the current working directory as the workspace.
+          </div>
+        </section>
+
+        <section class="docs-section" id="modes">
+          <h2>Workspace modes</h2>
+          <p>
+            The editor shares the window with the terminal in three layouts. Switching is instant and does not restart
+            your shell or close open documents.
+          </p>
+
+          <div class="mode-grid">
+            <article class="mode-card">
+              <div class="mode-tag">Mode A</div>
+              <h4>Pure Terminal</h4>
+              <p>The default Ocean experience. The editor keeps your documents in memory while hidden.</p>
+              <div class="mode-keys"><kbd>Ctrl</kbd><kbd>\</kbd><span class="shortcut-hint">to reopen Split</span></div>
+            </article>
+
+            <article class="mode-card">
+              <div class="mode-tag">Mode B</div>
+              <h4>Split</h4>
+              <p>Editor on top, live PTY terminal below. Drag the divider to resize; the ratio is clamped between 15% and 85%.</p>
+              <div class="mode-keys"><kbd>Ctrl</kbd><kbd>\</kbd></div>
+            </article>
+
+            <article class="mode-card">
+              <div class="mode-tag">Mode C</div>
+              <h4>Pure Editor</h4>
+              <p>The editor fills the window with its own tab bar, gutter, and status bar for focused work.</p>
+              <div class="mode-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>I</kbd></div>
+            </article>
+          </div>
+
+          <p>
+            The same modes are available from the command palette (<kbd>Ctrl</kbd>+<kbd>P</kbd>) under
+            <strong>View: Pure Editor Viewport</strong>, <strong>View: Toggle Terminal Split</strong>, and
+            <strong>View: Pure Terminal Mode</strong>.
+          </p>
+        </section>
+
+        <section class="docs-section" id="shortcuts">
+          <h2>Editor shortcuts</h2>
+          <p>
+            These are the default <strong>modeless</strong> bindings and become active whenever the editor pane has
+            focus. With <code>editor-keymap = vim</code>, use the Vim section below instead. Workspace toggles are
+            checked first, so you can always leave the editor without touching the mouse.
+          </p>
+
+          <h3>Workspace</h3>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Shortcut</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle between Pure Editor (Mode C) and terminal</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Open the terminal Context Menu (includes <strong>Toggle Code Editor</strong>)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Reload config and theme live</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Editing</h3>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Shortcut</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active document to disk</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the fuzzy file/command palette</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Show / hide the file explorer sidebar</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> cycle matches, <kbd>Esc</kbd> closes)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Trigger LSP autocompletion (<kbd>Up</kbd>/<kbd>Down</kbd> navigate, <kbd>Enter</kbd>/<kbd>Tab</kbd> accept, <kbd>Esc</kbd> dismiss)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Hover documentation for the symbol under the cursor</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo the last edit transaction, restoring the cursor</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Copy / cut / paste using the system clipboard</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Close the active document tab</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / previous open document</td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>Insert four spaces</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>Insert a newline and copy the current line's leading indentation</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Dismiss the palette, find bar, completion, or hover popup</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="docs-note">
+            The editor consumes editing keys only while it has focus. Global terminal bindings that are not used by the
+            editor — split management, tabs, font sizing — continue to work as usual.
+          </div>
+        </section>
+
+        <section class="docs-section" id="vim">
+          <h2>Vim keybindings (opt-in)</h2>
+          <p>
+            Set <code>editor-keymap = vim</code> in <code>~/.config/ocean/config</code> (it hot-reloads) to switch the
+            editor to modal editing. The default remains modeless.
+          </p>
+
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead><tr><th>Mode</th><th>Enter</th><th>Behavior</th></tr></thead>
+              <tbody>
+                <tr><td><strong>NORMAL</strong></td><td><kbd>Esc</kbd></td><td>Motions and operators, block cursor</td></tr>
+                <tr><td><strong>INSERT</strong></td><td><kbd>i</kbd> <kbd>a</kbd> <kbd>I</kbd> <kbd>A</kbd> <kbd>o</kbd> <kbd>O</kbd></td><td>Typing and IME/Myanmar input</td></tr>
+                <tr><td><strong>VISUAL</strong></td><td><kbd>v</kbd></td><td>Charwise selection with inclusive cursor</td></tr>
+                <tr><td><strong>VISUAL LINE</strong></td><td><kbd>V</kbd></td><td>Full-row selection for line operations</td></tr>
+                <tr><td><strong>COMMAND</strong></td><td><kbd>:</kbd></td><td><code>:w</code>, <code>:q</code>, <code>:wq</code>, <code>:q!</code>, <code>:42</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Motions and operators</h3>
+          <ul>
+            <li><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> and arrows move the cursor; counts work as expected (<code>3j</code>, <code>5l</code>).</li>
+            <li><code>w</code> <code>b</code> <code>e</code> move by word; <code>0</code> <code>^</code> <code>$</code> target line bounds; <code>gg</code> and <code>G</code> jump to the first/last line.</li>
+            <li><code>d</code>, <code>y</code>, and <code>c</code> accept motions: <code>dd</code>, <code>dw</code>, <code>d$</code>, <code>dj</code>, <code>dk</code>, <code>cw</code>.</li>
+            <li><code>x</code>, <code>X</code>, <code>p</code>, <code>P</code>, <code>J</code>, <code>r</code>, and <code>~</code> handle character edits, paste, join, replace, and case toggling.</li>
+            <li><kbd>u</kbd> and <kbd>Ctrl</kbd>+<kbd>r</kbd> undo and redo; Visual <code>d/y/c</code> operate on the selection.</li>
+            <li>Deletion and cursor motion stay grapheme-cluster aware, so <code>x</code> removes a whole Myanmar syllable.</li>
+          </ul>
+
+          <div class="docs-note">
+            The editor status strip shows the current mode, pending count/operator, command line, and any Ex error
+            message. In Normal/Visual mode every key is consumed by the editor so it never reaches the terminal.
+          </div>
+        </section>
+
+        <section class="docs-section" id="interface">
+          <h2>Interface</h2>
+          <p>
+            The editor uses a VSCode-inspired layout with a single set of chrome elements that stay consistent across
+            Split and Pure Editor modes.
+          </p>
+          <ul>
+            <li><strong>Document tabs</strong> are always visible, with an active accent, unsaved dirty dot, per-tab close button, and a <code>+</code> button for a new document.</li>
+            <li><strong>Breadcrumbs</strong> below the tabs show the active file path relative to the workspace root.</li>
+            <li><strong>Activity bar</strong> on the left switches between <strong>Explorer</strong> and <strong>Problems</strong>; the magnifier opens the command palette.</li>
+            <li><strong>Problems panel</strong> lists diagnostics across open documents; click an entry to open the file and jump to the line.</li>
+            <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state.</li>
+            <li><strong>Code surface</strong> adds a full-width current-line highlight, indent guides, matching-bracket highlights, and cluster-aware selection.</li>
+            <li><strong>Command palette</strong> dims the editor behind a wider modal panel.</li>
+            <li><strong>Pure Editor</strong> hides the terminal tab bar and global shortcut bar, leaving one top tab row and one bottom status bar.</li>
+          </ul>
+        </section>
+
+        <section class="docs-section" id="explorer">
+          <h2>File explorer</h2>
+          <p>
+            Toggle the workspace tree with <kbd>Ctrl</kbd>+<kbd>B</kbd>. The sidebar is backed by the folder you opened
+            with <code>ocean edit &lt;dir&gt;</code> (or the inherited shell working directory).
+          </p>
+          <ul>
+            <li><strong>Click a directory</strong> to expand or collapse it; <strong>click a file</strong> to open it in a new tab.</li>
+            <li><strong>Click the header</strong> to rescan the workspace after files change on disk.</li>
+            <li><strong>Drag the right edge</strong> of the sidebar to resize it. The default width is 210 px with an 80 px minimum.</li>
+            <li><strong>Mouse wheel</strong> scrolls the tree independently of the editor buffer.</li>
+            <li>Noisy directories — <code>.git</code>, <code>target</code>, <code>node_modules</code>, <code>.cache</code>, and <code>.DS_Store</code> — are skipped automatically.</li>
+          </ul>
+        </section>
+
+        <section class="docs-section" id="palette">
+          <h2>Command palette &amp; file finder</h2>
+          <p>
+            Press <kbd>Ctrl</kbd>+<kbd>P</kbd> for a single fuzzy entry point powered by <code>nucleo-matcher</code>.
+            Typing filters both built-in commands and workspace files, ranked by match quality.
+          </p>
+          <ul>
+            <li><strong>File search</strong> walks the workspace up to eight levels deep, respecting <code>.gitignore</code> and hidden-file rules.</li>
+            <li><strong>Built-in commands</strong> include Save, New Document, Close Document, Find, Toggle Explorer, Toggle Split, Pure Editor, Pure Terminal, Trigger Autocompletion, and plugin reload.</li>
+            <li><strong>Plugin commands</strong> registered through the WASM host appear alongside built-ins.</li>
+            <li><kbd>Up</kbd>/<kbd>Down</kbd> move the selection, <kbd>Enter</kbd> executes, <kbd>Backspace</kbd> edits the query, and <kbd>Esc</kbd> dismisses.</li>
+          </ul>
+        </section>
+
+        <section class="docs-section" id="languages">
+          <h2>Languages &amp; LSP</h2>
+          <p>
+            Syntax highlighting is selected automatically from the file extension, with a few filename special cases:
+            <code>Cargo.toml</code> and <code>config</code> use TOML, while <code>Dockerfile</code> uses Shell.
+          </p>
+
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Language</th><th>Extensions</th><th>Language server</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><strong>Rust</strong></td><td><code>.rs</code></td><td><code>rust-analyzer</code></td></tr>
+                <tr><td><strong>Go</strong></td><td><code>.go</code></td><td><code>gopls</code></td></tr>
+                <tr><td><strong>TypeScript / JavaScript</strong></td><td><code>.ts .tsx .js .jsx .mjs .cjs</code></td><td><code>vtsls</code> or <code>typescript-language-server --stdio</code></td></tr>
+                <tr><td><strong>Python</strong></td><td><code>.py</code></td><td><code>pylsp</code> or <code>pyright-langserver --stdio</code></td></tr>
+                <tr><td><strong>C / C++</strong></td><td><code>.c .h .cpp .hpp .cc .cxx</code></td><td><code>clangd</code></td></tr>
+                <tr><td><strong>HTML</strong></td><td><code>.html .htm</code></td><td><code>vscode-html-language-server --stdio</code></td></tr>
+                <tr><td><strong>CSS / SCSS</strong></td><td><code>.css .scss</code></td><td><code>vscode-css-language-server --stdio</code></td></tr>
+                <tr><td><strong>JSON / JSONC</strong></td><td><code>.json .jsonc</code></td><td><code>vscode-json-language-server --stdio</code></td></tr>
+                <tr><td><strong>YAML</strong></td><td><code>.yaml .yml</code></td><td><code>yaml-language-server --stdio</code></td></tr>
+                <tr><td><strong>TOML</strong></td><td><code>.toml</code>, <code>Cargo.toml</code>, <code>config</code></td><td><code>taplo lsp stdio</code></td></tr>
+                <tr><td><strong>Shell</strong></td><td><code>.sh .bash .zsh</code>, <code>Dockerfile</code></td><td><code>bash-language-server start</code></td></tr>
+                <tr><td><strong>Markdown</strong></td><td><code>.md .markdown</code></td><td><code>marksman server</code></td></tr>
+                <tr><td><strong>Plain text</strong></td><td>Anything else</td><td>—</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Language server behavior</h3>
+          <ul>
+            <li><strong>One server per language.</strong> A mixed workspace can run Rust, TypeScript, HTML, and CSS servers at the same time; each keeps its own project root and diagnostics.</li>
+            <li>Servers start automatically when a supported file is opened and communicate over stdio with JSON-RPC in background threads, so typing never blocks.</li>
+            <li>The client completes the LSP initialize handshake before sending document notifications, and answers server requests such as <code>client/registerCapability</code> and <code>workspace/configuration</code>.</li>
+            <li>Document open, change, save, and close notifications use monotonic revisions.</li>
+            <li>Completions and hover results are delivered asynchronously and matched to the file that requested them, so stale popups no longer appear.</li>
+            <li>Positions are converted between UTF-16 and shaped grapheme clusters, keeping diagnostics and hover correct for Myanmar and other non-ASCII text.</li>
+            <li>Errors and warnings render as colored gutter markers, Problems panel entries, and underline squiggles.</li>
+            <li>If no server binary is installed, editing still works: the status bar shows <code>LSP: &lt;server&gt; not found</code> and completion falls back to words already present in the buffer. Install the server and use the palette action <strong>LSP: Restart Language Server</strong>.</li>
+          </ul>
+          <div class="docs-note">
+            <strong>Install examples:</strong>
+            <code>rustup component add rust-analyzer</code>,
+            <code>go install golang.org/x/tools/gopls@latest</code>,
+            <code>npm i -g vscode-langservers-extracted yaml-language-server</code>,
+            <code>npm i -g vtsls</code>,
+            <code>cargo install taplo-cli marksman</code>,
+            <code>npm i -g bash-language-server</code>,
+            plus your distribution's <code>clangd</code> and <code>python-lsp-server</code> packages.
+          </div>
+        </section>
+
+        <section class="docs-section" id="myanmar">
+          <h2>Myanmar editing</h2>
+          <p>
+            The editor does not treat text as isolated codepoints. Lines are segmented with
+            <code>unicode-segmentation</code> and shaped with <code>rustybuzz</code>, so the cursor, selection, and
+            deletion all respect complete Burmese grapheme clusters.
+          </p>
+          <div class="myanmar-specimen" style="margin: 1.1rem 0">
+            <div class="specimen-row">
+              <div class="specimen-tag">Kinzi + Tall AA</div>
+              <div class="specimen-text">မင်္ဂလာပါ — မြန်မာဘာသာစကား</div>
+            </div>
+            <div class="specimen-row">
+              <div class="specimen-tag">Stacked Consonants &amp; Medials</div>
+              <div class="specimen-text">ပြည်ထောင်စု • ဗုဒ္ဓဘာသာ • ဣန္ဒြေ • တက္ကသိုလ်</div>
+            </div>
+            <div class="specimen-row">
+              <div class="specimen-tag">Pre-base E + Medial Ra</div>
+              <div class="specimen-text">ကြွေးမြီ • ကြေ • မြေ</div>
+            </div>
+          </div>
+          <ul>
+            <li><strong>Cluster cursor movement.</strong> Arrow keys step over a whole syllable instead of landing between a base consonant and its vowel or virama.</li>
+            <li><strong>Atomic deletion.</strong> <kbd>Backspace</kbd> and <kbd>Delete</kbd> remove composite clusters without leaving orphaned diacritics or dotted circles.</li>
+            <li><strong>UTN #11 normalization.</strong> Out-of-order typing such as <code>ကုိ</code> is normalized to <code>ကို</code>, and <code>ကေြ</code> to <code>ကြေ</code>.</li>
+            <li><strong>IME commits reach the document.</strong> Text composed by IBus, Fcitx, or Keyman is inserted at the editor caret instead of being sent to the shell.</li>
+            <li><strong>Visible preedit.</strong> Wayland (<code>zwp_text_input_v3</code>) and X11 (<code>XIM</code>) composition is rendered as a shaped pill at the editor cursor.</li>
+            <li><strong>Space and dead keys work.</strong> Space inserts a document space, and <code>event.text</code> fallbacks cover compose sequences and non-IME Burmese layouts.</li>
+            <li><strong>Vim-aware IME.</strong> With <code>editor-keymap = vim</code>, IME input is enabled only in Insert mode; Normal and Visual mode keys never leak into the terminal.</li>
+            <li><strong>Zawgyi-One display.</strong> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> toggles legacy log/file display without changing the underlying Unicode text.</li>
+          </ul>
+        </section>
+
+        <section class="docs-section" id="plugins">
+          <h2>WASM plugins</h2>
+          <p>
+            Ocean embeds <code>extism</code> to run sandboxed WebAssembly plugins built for <code>wasm32-wasip1</code>.
+            Drop <code>.wasm</code> files into <code>~/.config/ocean/plugins/</code>; each file stem becomes the plugin name.
+          </p>
+
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Host function</th><th>Signature</th><th>Purpose</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>ocean_get_buffer_slice</code></td><td><code>(offset: i64, len: i64) -&gt; String</code></td><td>Read a byte range from the active buffer</td></tr>
+                <tr><td><code>ocean_insert_text</code></td><td><code>(offset: i64, text: String)</code></td><td>Queue text insertion at a character offset</td></tr>
+                <tr><td><code>ocean_register_command</code></td><td><code>(name: String, callback: String)</code></td><td>Expose a command in the <kbd>Ctrl</kbd>+<kbd>P</kbd> palette</td></tr>
+                <tr><td><code>ocean_add_status_item</code></td><td><code>(text: String)</code></td><td>Add a persistent label to the editor status bar</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <ul>
+            <li>Pending insertions are applied safely on the main thread and clamped to the buffer length.</li>
+            <li>Registered commands run their callback function when selected from the command palette.</li>
+            <li>Status items appear next to the LSP state in the editor status bar.</li>
+            <li>Reload plugins without restarting via the palette action <strong>Plugins: Reload WASM Plugins</strong>.</li>
+          </ul>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>Plugin location</span>
+              <span>wasm32-wasip1</span>
+            </div>
+            <pre><span class="tok-comment"># Sandboxed plugins are loaded from:</span>
+<span class="tok-key">~/.config/ocean/plugins/</span>
+    format.wasm
+    linter.wasm
+    snippets.wasm</pre>
+          </div>
+        </section>
+
+        <section class="docs-section" id="mouse">
+          <h2>Mouse &amp; navigation</h2>
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead>
+                <tr><th>Interaction</th><th>Behavior</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Single click</td><td>Place the cursor at the clicked cluster</td></tr>
+                <tr><td>Click + drag</td><td>Cluster-aware text selection</td></tr>
+                <tr><td>Double click</td><td>Select the word under the pointer</td></tr>
+                <tr><td>Triple click</td><td>Select the entire line</td></tr>
+                <tr><td>Mouse wheel</td><td>Scroll the buffer (or the file explorer when hovering it)</td></tr>
+                <tr><td>Drag split divider</td><td>Resize Mode B between editor and terminal</td></tr>
+                <tr><td>Drag explorer edge</td><td>Resize the file explorer sidebar</td></tr>
+                <tr><td>Click a document tab</td><td>Switch the active document</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="docs-section" id="customize">
+          <h2>Customization</h2>
+          <p>
+            Workspace toggles are ordinary Ghostty-style keybinds, so they can be rebound in
+            <code>~/.config/ocean/config</code>. The editor itself uses your active theme palette and terminal font.
+          </p>
+
+          <div class="code-card">
+            <div class="code-card-header">
+              <span>~/.config/ocean/config</span>
+              <button type="button" class="copy-btn" data-copy-target="docs-keybinds">Copy</button>
+            </div>
+            <pre id="docs-keybinds"><span class="tok-comment"># Workspace toggles</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+i=toggle_editor</span>
+<span class="tok-key">keybind</span> = <span class="tok-val">ctrl+backslash=toggle_split_mode</span>
+
+<span class="tok-comment"># Editor keymap: modeless (default) or vim</span>
+<span class="tok-key">editor-keymap</span> = <span class="tok-val">modeless</span>
+
+<span class="tok-comment"># Theme and typography are shared with the terminal</span>
+<span class="tok-key">theme</span>                = <span class="tok-val">ocean-dark</span>
+<span class="tok-key">font-family</span>          = <span class="tok-val">Cascadia Code NF</span>
+<span class="tok-key">font-family-myanmar</span> = <span class="tok-val">Padauk</span>
+<span class="tok-key">font-size</span>            = <span class="tok-val">13.5</span></pre>
+          </div>
+
+          <ul>
+            <li>Changes hot-reload when you save the config, or immediately with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd>.</li>
+            <li>Validate syntax anytime with <code>ocean +validate-config</code>, or inspect resolved values with <code>ocean +show-config</code>.</li>
+            <li>Per-document state — cursor, scroll position, language, and undo history — is kept while the tab stays open.</li>
+          </ul>
+
+          <div class="docs-next">
+            <a href="./index.html#shortcuts" class="btn btn-secondary btn-sm">Terminal shortcuts</a>
+            <a href="./index.html#config" class="btn btn-secondary btn-sm">Full configuration</a>
+            <a href="./index.html#download" class="btn btn-primary btn-sm">Install Ocean</a>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      <div class="brand">
+        <img src="./assets/ocean.svg" alt="Ocean Logo" class="brand-logo" />
+        <span>Ocean Terminal — Released under the MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="./index.html">Home</a>
+        <a href="https://github.com/moekyawsoe/ocean" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/moekyawsoe/ocean/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href="https://github.com/moekyawsoe/ocean/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    document.querySelectorAll("[data-copy-target]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var el = document.getElementById(btn.getAttribute("data-copy-target"));
+        if (!el || !navigator.clipboard) return;
+        var original = btn.textContent;
+        navigator.clipboard.writeText(el.innerText.trim()).then(function () {
+          btn.textContent = "Copied!";
+          setTimeout(function () {
+            btn.textContent = original;
+          }, 1400);
+        });
+      });
+    });
+
+    var docsLinks = Array.prototype.slice.call(document.querySelectorAll(".docs-nav a"));
+    var docsSections = Array.prototype.slice.call(document.querySelectorAll(".docs-section"));
+
+    function setActiveDocLink(id) {
+      docsLinks.forEach(function (link) {
+        link.classList.toggle("active", link.getAttribute("href") === "#" + id);
+      });
+    }
+
+    if ("IntersectionObserver" in window) {
+      var docObserver = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) setActiveDocLink(entry.target.id);
+          });
+        },
+        { rootMargin: "-80px 0px -70% 0px", threshold: 0 }
+      );
+      docsSections.forEach(function (section) {
+        docObserver.observe(section);
+      });
+    }
+
+    setActiveDocLink("overview");
+  </script>
+</body>
+</html>

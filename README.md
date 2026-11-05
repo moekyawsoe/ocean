@@ -61,6 +61,16 @@ cargo build --release
 
 ## Highlights
 
+- **Built-in GPU-Accelerated IDE & Code Editor (`edit [path]` or `ocean edit [path]`)**:
+  - **Invocable Everywhere**: Launch directly via standalone `edit [path]`, `ocean edit [path]`, right-click context menu, or keyboard shortcuts (`Ctrl+Shift+I` toggles Pure Editor mode; `Ctrl+\` toggles Split Mode with Editor on top and Terminal on bottom). Typing `edit` (or `ocean edit`) with no arguments automatically opens the current path folder.
+  - **Interactive File Explorer Sidebar (`Ctrl+B`)**: Displays the active workspace folder tree with expandable directories and clickable files. Single-click opens any file immediately; click or drag divider to resize; toggle anytime with `Ctrl+B`.
+  - **Native OpenGL Pipeline**: Renders directly on Ocean's instanced Glow/OpenGL quad renderer and Winit event loop — no external TUI abstractions (`crossterm`/`ratatui`) required.
+  - **First-Class Myanmar Unicode Shaping**: Complex syllables with Virama (`U+1039`), Kinzi (`U+1004 U+103A U+1039`), medials (`U+103B..U+103E`), and combining vowels are unified into grapheme clusters and shaped with `rustybuzz`. Cursor movement locks to composite visual boundaries; backspace/delete removes composite clusters atomically without leaving orphaned diacritics or dotted circles.
+  - **High-Performance Buffer**: Powered by `ropey` (B-tree Rope) for O(log N) edits on multi-megabyte files, with full undo/redo transaction stack and position restoration.
+  - **Modeless Ergonomics**: Standard developer shortcuts: `Ctrl+S` (Save), `Ctrl+P` (Fuzzy file/command palette powered by `nucleo-matcher`), `Ctrl+F` (Find bar with match navigation), `Ctrl+Z` (Undo), `Ctrl+Y` / `Ctrl+Shift+Z` (Redo), `Ctrl+C` (Copy), `Ctrl+V` (Paste), `Ctrl+X` (Cut), `Ctrl+W` (Close document), and mouse click/drag text selection.
+  - **Syntax Highlighting**: Lexical and Tree-sitter tokenizers mapping semantic syntax tokens to Ocean's active color themes across Rust, Python, TypeScript, JavaScript, Go, C/C++, JSON, TOML, Markdown, and Shell.
+  - **Embedded Multi-Server LSP Client**: Asynchronous JSON-RPC clients for Rust (`rust-analyzer`), Go (`gopls`), TypeScript/JavaScript (`vtsls` or `typescript-language-server`), Python (`pylsp`/`pyright`), C/C++ (`clangd`), HTML/CSS/SCSS (`vscode-html-language-server` / `vscode-css-language-server`), JSON, YAML, TOML (`taplo`), Shell (`bash-language-server`), and Markdown (`marksman`). Each language gets its own server process, project root, diagnostics, completion popup (`Ctrl+Space`), and hover documentation (`Ctrl+K`).
+  - **Sandboxed WASM Plugin Engine**: Embeds `extism` to run sandboxed WebAssembly plugins (`wasm32-wasip1`) loaded from `~/.config/ocean/plugins/`, exposing buffer manipulation, custom command registration, and status bar extensions.
 - **Ultra-Lightweight & Fast**: Single-draw-call OpenGL 3.3 / GLES 3.0 instanced GPU renderer (`glutin` + `glow`), shelf-packed `swash` glyph & color emoji atlas, O(1) `FxHashMap` shaped-run memoization, coalesced epoll PTY reader, and **0% idle CPU** (`ControlFlow::Wait`).
 - **Full Myanmar / Burmese Support (`U+1000..U+109F`, `U+AA60..U+AA7F`, `U+A9E0..U+A9FF`)**:
   - **HarfBuzz (`rustybuzz`) Run-Based OpenType `mym2`/`mymr` Shaping**: Properly shapes Kinzi (`င်္ဂ`), pre-base vowel `ေ`, medial `ြ ျ ွ ှ` (narrow & wide consonant variants), stacked subjoined consonants (`ဗုဒ္ဓ`, `ဣန္ဒြေ`, `မန္တလေး`, `တက္ကသိုလ်`), tall vs round `ါ`/`ာ` (`ပါ`), `ဦး`, `၎င်း`, and Myanmar digits (`၀-၉`) with **zero dotted circles**.
@@ -142,15 +152,21 @@ keybind = alt+shift+equal=equalize_splits
 keybind = ctrl+shift+w=close_surface
 keybind = ctrl+shift+comma=reload_config
 keybind = ctrl+shift+m=toggle_myanmar_zawgyi
+keybind = ctrl+shift+i=toggle_editor
+keybind = ctrl+backslash=toggle_split_mode
 ```
 
 ---
 
 ## Default Shortcuts
 
+### Terminal & Global Shortcuts
+
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+P` / `Menu` / `Shift+F10` | Open / close Context Menu at terminal cursor (navigate with `j`/`k`, `t` themes, `1`–`9`, mnemonics) |
+| `Ctrl+Shift+I` | Toggle built-in Code Editor (Pure Editor Mode C) |
+| `Ctrl+\` | Toggle Split Mode B (Editor Top, Terminal Bottom with mouse-draggable divider) |
+| `Ctrl+Shift+P` / `Menu` / `Shift+F10` | Open / close Context Menu at cursor (navigate with `j`/`k`, `t` themes, `1`–`9`, mnemonics) |
 | `Ctrl+Shift+B` | Show / hide bottom Neovim-style shortcut bar |
 | `Ctrl+Shift+C` / `Ctrl+Insert` | Copy selection to clipboard |
 | `Ctrl+Shift+V` / `Shift+Insert` | Paste from clipboard |
@@ -169,3 +185,63 @@ keybind = ctrl+shift+m=toggle_myanmar_zawgyi
 | `Shift+PageUp` / `Shift+PageDown` | Scroll history page up / down |
 | `Ctrl+Left Click` | Open URL under cursor |
 | `F11` | Toggle fullscreen |
+
+### Code Editor Shortcuts (Modeless TTT-Style)
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+B` | Toggle File Explorer Sidebar (show / hide project folder tree) |
+| `Ctrl+S` | Save current document buffer to disk |
+| `Ctrl+P` | Open Command Palette / Fuzzy File Finder (powered by `nucleo-matcher`) |
+| `Ctrl+F` | Open in-buffer Find Bar (`Enter` / `Shift+Enter` cycles matches, `Esc` dismisses) |
+| `Ctrl+Space` | Trigger asynchronous LSP autocompletion popup (`Up`/`Down` navigates, `Enter`/`Tab` completes) |
+| `Ctrl+K` | Show hover documentation popup for symbol under cursor |
+| `Ctrl+Z` | Undo last edit transaction with cursor restoration |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | Redo previously undone edit |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / Cut selection / Paste from clipboard |
+| `Ctrl+W` | Close current document tab |
+| `Mouse Drag on Divider` | Resize Split Mode B (Editor top ratio vs Terminal bottom ratio) |
+| `Mouse Click & Drag` | Precise cluster-aware text selection |
+
+### Optional Vim Keybindings
+
+Set `editor-keymap = vim` in `~/.config/ocean/config` (live-reloads with `Ctrl+Shift+,`). Ocean then uses modal editing:
+
+| Mode | Entry | Notes |
+|---|---|---|
+| `NORMAL` | `Esc` | Motions and operators; block cursor |
+| `INSERT` | `i` `a` `I` `A` `o` `O` | IME/Myanmar input is active only in this mode |
+| `VISUAL` / `VISUAL LINE` | `v` / `V` | Charwise or linewise selection |
+| `COMMAND` | `:` | `:w`, `:q`, `:wq`, `:q!`, `:<line>` |
+
+| Keys | Action |
+|---|---|
+| `h j k l`, arrows | Move cursor |
+| `w b e`, `0 ^ $`, `gg G`, `{n}G` | Word / line / document motions |
+| `d y c` + motion (`dd`, `dw`, `d$`, `dj`, `dk`) | Delete / yank / change |
+| `x X p P J r ~` | Character edits, paste, join, replace, toggle case |
+| `u` / `Ctrl+r` | Undo / redo |
+| `v` … `d/y/c`, `V` … `d/y/c` | Visual char/line operations |
+| `/`, `n`, `N` | Search using the find bar |
+| `:` + `w/q/wq/q!/<line>` | Save, close, or jump to a line |
+
+### Language Server Setup (optional)
+
+Ocean starts whatever server it finds on `PATH`; if none is installed, editing still works and the status bar shows `LSP: <server> not found`.
+
+```bash
+# Rust, Go, C/C++
+rustup component add rust-analyzer
+go install golang.org/x/tools/gopls@latest
+sudo apt install clangd
+
+# TypeScript / JavaScript, HTML, CSS, JSON, YAML
+npm i -g vscode-langservers-extracted yaml-language-server
+npm i -g vtsls   # or: npm i -g typescript-language-server
+
+# Python, TOML, Shell, Markdown
+pip install python-lsp-server
+cargo install taplo-cli
+npm i -g bash-language-server
+cargo install marksman
+```

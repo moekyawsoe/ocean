@@ -73,6 +73,14 @@ window-show-tab-bar = auto
 # Neovim-style bottom shortcut & mode status bar (`true` / `false`, toggle live with `Ctrl+Shift+B`)
 window-show-status-bar = true
 
+# Built-in editor keymap: `modeless` (default) or `vim` (Normal / Insert / Visual / Visual-Line)
+editor-keymap = modeless
+
+# Display backend: `auto` (default), `wayland`, or `x11` (XWayland)
+# Under `auto` on Linux, Ocean automatically selects XWayland when running under GNOME
+# Wayland to prevent terminal sessions from being killed during screen blank or system sleep.
+backend = auto
+
 # --- Updates & Releases ---
 # Frequency to check GitHub Releases in background: `daily` (default, 24h cache), `always`, `off`
 # When an update is available, a clickable badge appears in the bottom status bar and Context Menu.

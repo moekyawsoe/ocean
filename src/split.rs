@@ -344,17 +344,40 @@ pub fn compute_split_layout(
     tab_bar_h: f32,
     status_bar_h: f32,
 ) -> (Vec<PaneLayout>, Vec<SplitDivider>) {
+    compute_split_layout_in_rect(
+        root,
+        config,
+        font_sys,
+        0.0,
+        tab_bar_h,
+        win_w as f32,
+        (win_h as f32 - tab_bar_h - status_bar_h).max(1.0),
+        scale_factor,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn compute_split_layout_in_rect(
+    root: &SplitNode,
+    config: &Config,
+    font_sys: &FontSystem,
+    rect_x: f32,
+    rect_y: f32,
+    rect_w: f32,
+    rect_h: f32,
+    scale_factor: f64,
+) -> (Vec<PaneLayout>, Vec<SplitDivider>) {
     let sf = scale_factor as f32;
     let pad_l = config.window_padding_x.0 as f32 * sf;
     let pad_r = config.window_padding_x.1 as f32 * sf;
-    let pad_t = config.window_padding_y.0 as f32 * sf + tab_bar_h;
-    let pad_b = config.window_padding_y.1 as f32 * sf + status_bar_h;
+    let pad_t = config.window_padding_y.0 as f32 * sf;
+    let pad_b = config.window_padding_y.1 as f32 * sf;
 
     let cw = font_sys.metrics.cell_width.max(1.0);
     let ch = font_sys.metrics.cell_height.max(1.0);
 
-    let avail_w = (win_w as f32 - pad_l - pad_r).max(cw * 2.0);
-    let avail_h = (win_h as f32 - pad_t - pad_b).max(ch);
+    let avail_w = (rect_w - pad_l - pad_r).max(cw * 2.0);
+    let avail_h = (rect_h - pad_t - pad_b).max(ch);
 
     if let SplitNode::Leaf(pane_id) = root {
         let cols = (avail_w / cw).floor().clamp(2.0, 1000.0) as u16;
@@ -362,17 +385,20 @@ pub fn compute_split_layout(
         let (ox, oy) = if config.window_padding_balance {
             let rem_w = (avail_w - cols as f32 * cw).max(0.0);
             let rem_h = (avail_h - rows as f32 * ch).max(0.0);
-            ((pad_l + rem_w * 0.5).floor(), (pad_t + rem_h * 0.5).floor())
+            (
+                (rect_x + pad_l + rem_w * 0.5).floor(),
+                (rect_y + pad_t + rem_h * 0.5).floor(),
+            )
         } else {
-            (pad_l.floor(), pad_t.floor())
+            ((rect_x + pad_l).floor(), (rect_y + pad_t).floor())
         };
         return (
             vec![PaneLayout {
                 pane_id: *pane_id,
-                bounds_x: 0.0,
-                bounds_y: tab_bar_h,
-                bounds_w: win_w as f32,
-                bounds_h: (win_h as f32 - tab_bar_h - status_bar_h).max(1.0),
+                bounds_x: rect_x,
+                bounds_y: rect_y,
+                bounds_w: rect_w,
+                bounds_h: rect_h,
                 origin_x: ox,
                 origin_y: oy,
                 cols,
@@ -499,8 +525,8 @@ pub fn compute_split_layout(
 
     walk(
         root,
-        pad_l,
-        pad_t,
+        rect_x + pad_l,
+        rect_y + pad_t,
         avail_w,
         avail_h,
         cw,
