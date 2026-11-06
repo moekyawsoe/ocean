@@ -93,7 +93,7 @@ cargo build --release
   - Full keyboard split management: focus (`Alt+Shift+H/J/K/L` or `Alt+Shift+Arrows`), resize (`Ctrl+Alt+H/J/K/L` or `Ctrl+Alt+Arrows`), and equalize (`Alt+Shift+=`).
 - **Built-in `file` Tool (`file [path]` or `ocean file [path]`)**:
   - **Universal Terminal File Viewer**: Open any file or URL right from the terminal with sub-millisecond startup and zero lag.
-  - **Multitasking PDF Viewer with Auto-Split**: Running `file document.pdf` inside Ocean automatically splits a pane to the side, allowing you to read documentation without disrupting your running shell task. When you exit with `q`, the split pane closes automatically.
+  - **Multitasking PDF Viewer with Auto-Split**: Running `ocean file document.pdf` inside Ocean automatically splits a pane, renders the page (text and images) with `pdftoppm` + `chafa`, and keeps your shell running. Press `t` to switch between image and text mode, and `q` to close the split.
   - **Dedicated Markdown Reader**: View `.md` files in a dedicated read/view pager with ANSI headings, code block borders, blockquotes, styled lists, tables, and `/` search (read-only mode so existing `edit` tool remains your editor).
   - **Lightweight Audio / Video & YouTube Player**: Play local media files (`.mp3`, `.wav`, `.ogg`, `.flac`, `.mp4`, `.mkv`, etc.) and stream YouTube songs or playlists by URL, video ID, or playlist ID. Features interactive terminal playback controls: `[Space]` pause/resume, `[n]` next track, `[p]` previous track, `[s]` stop, and `[q]` quit.
 - **Ghostty-Compatible Config (`~/.config/ocean/config`)**:

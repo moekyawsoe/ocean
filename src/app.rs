@@ -1674,7 +1674,7 @@ impl OceanApp {
                 self.editor.show_git_diff();
                 self.editor.editor_focused = true;
             }
-            MenuAction::OpenFile | MenuAction::GoToFile | MenuAction::CommandPalette => {
+            MenuAction::OpenFile | MenuAction::CommandPalette => {
                 self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
                 self.editor.editor_focused = true;
                 self.editor.open_command_palette(&workspace);

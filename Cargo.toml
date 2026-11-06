@@ -1,5 +1,6 @@
 [package]
 name = "ocean"
+default-run = "ocean"
 version = "1.1.0"
 edition = "2024"
 description = "Clean, lightweight, GPU-accelerated terminal emulator and built-in code editor with full Myanmar/Burmese support"

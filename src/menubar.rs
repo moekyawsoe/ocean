@@ -22,7 +22,6 @@ pub enum MenuAction {
     ToggleMenuBar,
     ToggleSplit,
     PureEditorMode,
-    GoToFile,
     ShowHelp,
     OpenConfig,
     OpenSettings,
@@ -170,7 +169,12 @@ impl MenuBar {
                 title: "View",
                 entries: vec![
                     entry("Explorer", "Ctrl+B", MenuAction::ToggleExplorer, true),
-                    entry("Find in Files", "Ctrl+Shift+F", MenuAction::SearchPanel, true),
+                    entry(
+                        "Find in Files",
+                        "Ctrl+Shift+F",
+                        MenuAction::SearchPanel,
+                        true,
+                    ),
                     entry("Problems", "", MenuAction::ToggleProblems, true),
                     entry("Git Changes", "Ctrl+Shift+G", MenuAction::GitChanges, true),
                     entry("Show Git Diff", "", MenuAction::ShowGitDiff, true),

@@ -43,7 +43,7 @@ impl EditorView {
         hover: Option<&HoverOverlay>,
         diagnostics: &[EditorDiagnostic],
         _plugin_status_items: &[String],
-        lsp_status: Option<&str>,
+        _lsp_status: Option<&str>,
         explorer: Option<&FileExplorer>,
         scrollbar_dragging: bool,
         scrollbar_hovered: bool,
@@ -235,14 +235,6 @@ impl EditorView {
             tab_h,
             theme.background.to_f32_rgba(0.95),
         ));
-        fg_instances.push(QuadInstance::solid(
-            vp.x,
-            vp.y + tab_h - 1.0,
-            vp.w,
-            1.0,
-            theme.foreground.to_f32_rgba(0.12),
-        ));
-
         let collapsed_pad = if !panel_open { 46.0 * ui } else { 0.0 };
         if !panel_open {
             let icon_baseline = vp.y + (tab_h - line_h) * 0.5 + baseline;
@@ -276,29 +268,6 @@ impl EditorView {
 
         for (idx, (name, is_dirty)) in doc_titles.iter().enumerate() {
             let is_active = idx == active_doc_idx;
-            let bg_col = if is_active {
-                theme.selection_background.to_f32_rgba(0.40)
-            } else {
-                theme.background.to_f32_rgba(0.20)
-            };
-
-            bg_instances.push(QuadInstance::solid(
-                tab_x,
-                vp.y + 2.0,
-                tab_w,
-                tab_h - 3.0,
-                bg_col,
-            ));
-
-            if is_active {
-                fg_instances.push(QuadInstance::solid(
-                    tab_x,
-                    vp.y + 2.0,
-                    tab_w,
-                    2.0,
-                    theme.cursor_color.to_f32_rgba(1.0),
-                ));
-            }
 
             if name == "Settings" {
                 let title: String = name.chars().take(max_title_chars).collect();
@@ -378,28 +347,6 @@ impl EditorView {
             tab_x += tab_w + 4.0;
         }
 
-        // New tab button
-        if tab_x + 22.0 * ui < vp.x + vp.w - 8.0 {
-            let button_w = tab_h - 4.0 * ui;
-            bg_instances.push(QuadInstance::solid(
-                tab_x,
-                vp.y + 3.0 * ui,
-                button_w,
-                tab_h - 5.0 * ui,
-                theme.foreground.to_f32_rgba(0.06),
-            ));
-            icons::emit(
-                font_sys,
-                atlas,
-                fg_instances,
-                IconId::Plus,
-                tab_x + (button_w - 11.0 * ui) * 0.5,
-                vp.y + (tab_h - 11.0 * ui) * 0.5,
-                11.0 * ui,
-                theme.foreground.to_f32_rgba(0.65),
-            );
-        }
-
         // 2b. Breadcrumb bar removed to match pure editor UI
         let crumb_h = 0.0_f32;
 
@@ -432,7 +379,11 @@ impl EditorView {
             let branch = git.branch.as_deref().unwrap_or("master");
             let blame_str = if let Some(lines) = doc.path().and_then(|p| git.blame_for(p)) {
                 if let Some(blame) = lines.get(doc.cursor.line) {
-                    let author = if blame.author.is_empty() { "mks" } else { &blame.author };
+                    let author = if blame.author.is_empty() {
+                        "mks"
+                    } else {
+                        &blame.author
+                    };
                     format!("{author}, 1 day ago")
                 } else {
                     "mks, 1 day ago".to_string()
@@ -504,20 +455,13 @@ impl EditorView {
         let text_area_x = vp.x + gutter_w;
         let text_area_w = (vp.w - gutter_w - scrollbar_w).max(1.0);
 
-        // Gutter background & border
+        // Gutter background
         bg_instances.push(QuadInstance::solid(
             vp.x,
             content_y,
             gutter_w,
             content_h,
             theme.background.to_f32_rgba(0.98),
-        ));
-        fg_instances.push(QuadInstance::solid(
-            vp.x + gutter_w - 1.0,
-            content_y,
-            1.0,
-            content_h,
-            theme.foreground.to_f32_rgba(0.08),
         ));
 
         let visible_lines = (content_h / line_h).ceil() as usize + 1;
@@ -1012,7 +956,7 @@ impl EditorView {
         config: &Config,
         font_sys: &mut FontSystem,
         atlas: &mut GlyphAtlas,
-        bg_instances: &mut Vec<QuadInstance>,
+        _bg_instances: &mut Vec<QuadInstance>,
         fg_instances: &mut Vec<QuadInstance>,
         sx: f32,
         sy: f32,
@@ -1024,21 +968,6 @@ impl EditorView {
         baseline: f32,
     ) {
         let theme = &config.colors;
-        bg_instances.push(QuadInstance::solid(
-            sx,
-            sy,
-            sw - 1.0,
-            header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        fg_instances.push(QuadInstance::solid(
-            sx,
-            sy + header_h - 1.0,
-            sw - 1.0,
-            1.0,
-            theme.foreground.to_f32_rgba(0.12),
-        ));
-
         let header_baseline = sy + (header_h - line_h) * 0.5 + baseline;
         let is_exp = active_panel == crate::editor::SidebarPanel::Explorer;
         let is_find = active_panel == crate::editor::SidebarPanel::Search;
@@ -1053,7 +982,9 @@ impl EditorView {
             "Explore",
             sx + 8.0 * ui,
             header_baseline,
-            theme.foreground.to_f32_rgba(if is_exp { 1.0 } else { 0.55 }),
+            theme
+                .foreground
+                .to_f32_rgba(if is_exp { 1.0 } else { 0.55 }),
         );
 
         // Find
@@ -1065,7 +996,9 @@ impl EditorView {
             "Find",
             sx + 62.0 * ui,
             header_baseline,
-            theme.foreground.to_f32_rgba(if is_find { 1.0 } else { 0.55 }),
+            theme
+                .foreground
+                .to_f32_rgba(if is_find { 1.0 } else { 0.55 }),
         );
 
         // Changes
@@ -1077,7 +1010,9 @@ impl EditorView {
             "Changes",
             sx + 104.0 * ui,
             header_baseline,
-            theme.foreground.to_f32_rgba(if is_git { 1.0 } else { 0.55 }),
+            theme
+                .foreground
+                .to_f32_rgba(if is_git { 1.0 } else { 0.55 }),
         );
 
         // >> (collapse sidebar button)
@@ -1129,13 +1064,19 @@ impl EditorView {
 
         // 1. Categories bar
         let categories = [
-            ("General", crate::editor::settings::SettingsCategory::General),
+            (
+                "General",
+                crate::editor::settings::SettingsCategory::General,
+            ),
             ("Editor", crate::editor::settings::SettingsCategory::Editor),
             (
                 "Appearance",
                 crate::editor::settings::SettingsCategory::Appearance,
             ),
-            ("Sidebar", crate::editor::settings::SettingsCategory::Sidebar),
+            (
+                "Sidebar",
+                crate::editor::settings::SettingsCategory::Sidebar,
+            ),
             (
                 "Terminal",
                 crate::editor::settings::SettingsCategory::Terminal,
@@ -1249,33 +1190,36 @@ impl EditorView {
         let mut cur_y = content_y;
         let item_h = (26.0 * ui).max(line_h);
 
-        let mut emit_section =
-            |title: &str, y: f32, fg: &mut Vec<QuadInstance>, font_sys: &mut FontSystem, atlas: &mut GlyphAtlas| {
-                let title_w = title.chars().count() as f32 * cell_w;
-                emit_simple_string(
-                    config,
-                    font_sys,
-                    atlas,
-                    fg,
-                    title,
-                    vp.x + 24.0 * ui,
-                    y + baseline,
-                    theme.foreground.to_f32_rgba(0.80),
-                );
-                let rule_start = vp.x + 24.0 * ui + title_w + 12.0 * ui;
-                let rule_end = (vp.x + 640.0 * ui).min(vp.x + vp.w - 30.0 * ui);
-                if rule_end > rule_start {
-                    fg.push(QuadInstance::solid(
-                        rule_start,
-                        (y + line_h * 0.45).round(),
-                        rule_end - rule_start,
-                        1.0,
-                        theme.foreground.to_f32_rgba(0.18),
-                    ));
-                }
-            };
+        let emit_section = |title: &str,
+                            y: f32,
+                            fg: &mut Vec<QuadInstance>,
+                            font_sys: &mut FontSystem,
+                            atlas: &mut GlyphAtlas| {
+            let title_w = title.chars().count() as f32 * cell_w;
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg,
+                title,
+                vp.x + 24.0 * ui,
+                y + baseline,
+                theme.foreground.to_f32_rgba(0.80),
+            );
+            let rule_start = vp.x + 24.0 * ui + title_w + 12.0 * ui;
+            let rule_end = (vp.x + 640.0 * ui).min(vp.x + vp.w - 30.0 * ui);
+            if rule_end > rule_start {
+                fg.push(QuadInstance::solid(
+                    rule_start,
+                    (y + line_h * 0.45).round(),
+                    rule_end - rule_start,
+                    1.0,
+                    theme.foreground.to_f32_rgba(0.18),
+                ));
+            }
+        };
 
-        let mut emit_row = |label: &str,
+        let emit_row = |label: &str,
                         value_str: &str,
                         is_checked: Option<bool>,
                         y: f32,
@@ -2376,15 +2320,6 @@ impl EditorView {
             theme.background.to_f32_rgba(0.97),
         ));
 
-        // 2. Vertical Divider between Sidebar and Code Viewport
-        fg_instances.push(QuadInstance::solid(
-            sx + sw - 1.0,
-            sy,
-            1.0,
-            sh,
-            theme.foreground.to_f32_rgba(0.12),
-        ));
-
         // 3. Header: Explore  Find  Changes       »   :
         let header_h = (line_h + 6.0).round();
         Self::emit_sidebar_header(
@@ -2461,10 +2396,13 @@ impl EditorView {
                     caret,
                     item_x,
                     item_baseline,
-                    theme.foreground.to_f32_rgba(if entry.is_expanded { 0.85 } else { 0.60 }),
+                    theme
+                        .foreground
+                        .to_f32_rgba(if entry.is_expanded { 0.85 } else { 0.60 }),
                 );
 
-                let max_chars = ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
+                let max_chars =
+                    ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
                 let truncated: String = entry.name.chars().take(max_chars).collect();
 
                 emit_simple_string(
@@ -2493,7 +2431,8 @@ impl EditorView {
                     file_icon_color,
                 );
 
-                let max_chars = ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
+                let max_chars =
+                    ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
                 let truncated: String = entry.name.chars().take(max_chars).collect();
 
                 emit_simple_string(

@@ -393,7 +393,10 @@ impl Config {
 
     /// Update or append multiple `key = value` options in the configuration file and persist to disk.
     /// Preserves all existing comments, formatting, and unmodified keys.
-    pub fn save_setting_key_values(&mut self, updates: &[(&str, String)]) -> Result<PathBuf, String> {
+    pub fn save_setting_key_values(
+        &mut self,
+        updates: &[(&str, String)],
+    ) -> Result<PathBuf, String> {
         let target_path = self
             .loaded_path
             .clone()

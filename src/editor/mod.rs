@@ -983,10 +983,7 @@ impl EditorWorkspace {
         }
 
         // Ctrl+, : Open Settings
-        if ctrl
-            && !shift
-            && matches!(&event.logical_key, Key::Character(s) if s == ",")
-        {
+        if ctrl && !shift && matches!(&event.logical_key, Key::Character(s) if s == ",") {
             self.open_settings_default();
             return true;
         }
@@ -1710,7 +1707,9 @@ impl EditorWorkspace {
             }
 
             let count = self.documents.len().max(1);
-            let tab_w = (180.0_f32).min((code_vp.w - 40.0 - collapsed_pad) / count as f32).max(60.0);
+            let tab_w = (180.0_f32)
+                .min((code_vp.w - 40.0 - collapsed_pad) / count as f32)
+                .max(60.0);
             let relative = px - code_vp.x - 4.0 - collapsed_pad;
             let tab_idx = (relative / (tab_w + 4.0)).floor();
             if tab_idx >= 0.0 {
@@ -1741,15 +1740,7 @@ impl EditorWorkspace {
             let status_h = (line_h * 0.80 + 4.0).round();
             let content_h = (code_vp.y + code_vp.h - status_h - content_y).max(1.0);
             return self.handle_settings_click(
-                px,
-                py,
-                code_vp.x,
-                content_y,
-                code_vp.w,
-                content_h,
-                ui,
-                line_h,
-                config,
+                px, py, code_vp.x, content_y, code_vp.w, content_h, ui, line_h, config,
             );
         }
 
@@ -1910,16 +1901,20 @@ impl EditorWorkspace {
                 let row3 = row2 + item_h + 20.0 * ui + item_h + 8.0 * ui;
 
                 if py >= row0 && py < row0 + item_h {
-                    self.settings_state.toggle_option(SettingsCategory::General, 0);
+                    self.settings_state
+                        .toggle_option(SettingsCategory::General, 0);
                     return true;
                 } else if py >= row1 && py < row1 + item_h {
-                    self.settings_state.toggle_option(SettingsCategory::General, 1);
+                    self.settings_state
+                        .toggle_option(SettingsCategory::General, 1);
                     return true;
                 } else if py >= row2 && py < row2 + item_h {
-                    self.settings_state.toggle_option(SettingsCategory::General, 2);
+                    self.settings_state
+                        .toggle_option(SettingsCategory::General, 2);
                     return true;
                 } else if py >= row3 && py < row3 + item_h {
-                    self.settings_state.toggle_option(SettingsCategory::General, 3);
+                    self.settings_state
+                        .toggle_option(SettingsCategory::General, 3);
                     return true;
                 }
             }
@@ -1930,7 +1925,8 @@ impl EditorWorkspace {
                         cur += 20.0 * ui + item_h + 8.0 * ui;
                     }
                     if py >= cur && py < cur + item_h {
-                        self.settings_state.toggle_option(SettingsCategory::Editor, idx);
+                        self.settings_state
+                            .toggle_option(SettingsCategory::Editor, idx);
                         return true;
                     }
                     cur += item_h;
@@ -1943,7 +1939,8 @@ impl EditorWorkspace {
                         cur += 20.0 * ui + item_h + 8.0 * ui;
                     }
                     if py >= cur && py < cur + item_h {
-                        self.settings_state.toggle_option(SettingsCategory::Appearance, idx);
+                        self.settings_state
+                            .toggle_option(SettingsCategory::Appearance, idx);
                         return true;
                     }
                     cur += item_h;
@@ -1956,7 +1953,8 @@ impl EditorWorkspace {
                         cur += 20.0 * ui + item_h + 8.0 * ui;
                     }
                     if py >= cur && py < cur + item_h {
-                        self.settings_state.toggle_option(SettingsCategory::Sidebar, idx);
+                        self.settings_state
+                            .toggle_option(SettingsCategory::Sidebar, idx);
                         return true;
                     }
                     cur += item_h;
@@ -1966,7 +1964,8 @@ impl EditorWorkspace {
                 let mut cur = content_y + item_h + 8.0 * ui;
                 for idx in 0..3 {
                     if py >= cur && py < cur + item_h {
-                        self.settings_state.toggle_option(SettingsCategory::Terminal, idx);
+                        self.settings_state
+                            .toggle_option(SettingsCategory::Terminal, idx);
                         return true;
                     }
                     cur += item_h;
@@ -1976,7 +1975,8 @@ impl EditorWorkspace {
                 let mut cur = content_y + item_h + 8.0 * ui;
                 for idx in 0..4 {
                     if py >= cur && py < cur + item_h {
-                        self.settings_state.toggle_option(SettingsCategory::Diff, idx);
+                        self.settings_state
+                            .toggle_option(SettingsCategory::Diff, idx);
                         return true;
                     }
                     cur += item_h;
@@ -3319,8 +3319,9 @@ mod tests {
     }
 
     #[test]
-    fn explorer_hover_uses_activity_bar_and_menu_offsets() {
+    fn explorer_hover_uses_menu_offset_with_clean_sidebar() {
         let mut ws = EditorWorkspace::new();
+        ws.activity_bar_visible = false;
         ws.menu_height = 10.0;
         ws.explorer.visible = true;
         ws.explorer.root_name = "workspace".to_string();
@@ -3342,7 +3343,7 @@ mod tests {
             h: 500.0,
         };
         let (sx, sy, sw, _) = ws.sidebar_rect(&vp).expect("explorer sidebar rect");
-        assert_eq!((sx, sy, sw), (44.0, 30.0, 210.0));
+        assert_eq!((sx, sy, sw), (0.0, 30.0, 210.0));
 
         let config = Config::default();
         let mut font_sys = FontSystem::new(&config, 1.0);

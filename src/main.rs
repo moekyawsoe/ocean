@@ -238,7 +238,9 @@ fn main() {
     let is_file_binary = prog_name.ends_with("/file")
         || prog_name == "file"
         || prog_name.ends_with("/ocean-file")
-        || prog_name == "ocean-file";
+        || prog_name == "ocean-file"
+        || prog_name.ends_with("/file-ocean")
+        || prog_name == "file-ocean";
 
     if is_file_binary || args.first().map(|s| s.as_str()) == Some("file") {
         let file_args = if !is_file_binary && args.first().map(|s| s.as_str()) == Some("file") {

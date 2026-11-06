@@ -66,11 +66,12 @@ pub fn print_help() {
         "\x1b[1;38;5;39mOcean File Tool\x1b[0m - Fast, lightweight terminal file viewer & media player\n"
     );
     println!("\x1b[1mUSAGE:\x1b[0m");
-    println!("    file <path-or-url> [OPTIONS]");
-    println!("    ocean file <path-or-url> [OPTIONS]\n");
+    println!("    ocean file <path-or-url> [OPTIONS]");
+    println!("    ocean-file <path-or-url> [OPTIONS]");
+    println!("\x1b[38;5;244m    (the system `file` command only reports file types)\x1b[0m\n");
     println!("\x1b[1mSUPPORTED FORMATS:\x1b[0m");
     println!(
-        "    \x1b[38;5;220mPDF Documents\x1b[0m       .pdf (Auto-splits pane in Ocean for multitasking)"
+        "    \x1b[38;5;220mPDF Documents\x1b[0m       .pdf (Auto-splits in Ocean; images via chafa, [t] text mode)"
     );
     println!(
         "    \x1b[38;5;45mMarkdown\x1b[0m            .md, .markdown (Dedicated read/view mode with ANSI styling)"
@@ -91,15 +92,15 @@ pub fn print_help() {
     println!("    --here              Force viewing in the current terminal pane");
     println!("    -h, --help          Show this help message\n");
     println!("\x1b[1mEXAMPLES:\x1b[0m");
-    println!("    file report.pdf                      # View PDF (splits pane in Ocean)");
-    println!("    file README.md                       # View Markdown in read-only mode");
-    println!("    file song.mp3                        # Play local audio with terminal controls");
-    println!("    file dQw4w9WgXcQ                     # Stream YouTube song by ID");
-    println!("    file \"https://youtube.com/watch?v=\"  # Stream YouTube song by URL");
+    println!("    ocean file report.pdf                # View PDF (splits pane in Ocean)");
+    println!("    ocean file README.md                 # View Markdown in read-only mode");
+    println!("    ocean-file song.mp3                  # Play local audio with terminal controls");
+    println!("    ocean-file dQw4w9WgXcQ               # Stream YouTube song by ID");
+    println!("    ocean-file \"https://youtube.com/watch?v=\"  # Stream YouTube song by URL");
     println!(
-        "    file \"https://youtube.com/playlist?list=\" # Interactive YouTube playlist player"
+        "    ocean-file \"https://youtube.com/playlist?list=\" # Interactive YouTube playlist player"
     );
-    println!("    file src/main.rs                     # View source code with line numbers");
+    println!("    ocean-file src/main.rs               # View source code with line numbers");
 }
 
 pub fn detect_file_type(input: &str) -> FileType {
@@ -174,11 +175,16 @@ pub fn run_file_cli(args: &[String]) {
             .and_then(|p| p.to_str().map(|s| s.to_string()))
             .unwrap_or_else(|| "ocean".to_string());
 
-        let cmd_args = vec![
-            "file".to_string(),
-            "--here".to_string(),
-            abs_path.to_string_lossy().to_string(),
-        ];
+        let exe_name = Path::new(&current_exe)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("ocean");
+        let mut cmd_args = Vec::new();
+        if !exe_name.starts_with("ocean-file") && !exe_name.starts_with("file-ocean") {
+            cmd_args.push("file".to_string());
+        }
+        cmd_args.push("--here".to_string());
+        cmd_args.push(abs_path.to_string_lossy().to_string());
 
         let direction = opts.split_direction.as_deref().unwrap_or("right");
 

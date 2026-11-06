@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::pager::{Key, RawTerminal, strip_ansi};
@@ -11,23 +12,99 @@ pub fn view_pdf(path: &Path) -> io::Result<()> {
         .unwrap_or("document.pdf")
         .to_string();
 
-    let pages = extract_pdf_pages(path);
-    if pages.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "No extractable text found in PDF document.",
-        ));
+    let mut pages = extract_pdf_pages(path);
+    let page_count = pdf_page_count(path).unwrap_or(pages.len()).max(1);
+    while pages.len() < page_count {
+        pages.push(Vec::new());
     }
+    pages.truncate(page_count);
 
+    let image_tools = image_tools_available();
     let mut viewer = PdfViewer {
         file_name,
+        pdf_path: path.to_path_buf(),
         pages,
+        image_mode: image_tools,
+        image_cache: HashMap::new(),
+        visible_line_count: 1,
         current_page: 0,
         scroll_offset: 0,
         search_query: None,
     };
 
     viewer.run()
+}
+
+fn image_tools_available() -> bool {
+    Command::new("pdftoppm").arg("-v").output().is_ok()
+        && Command::new("chafa").arg("--version").output().is_ok()
+}
+
+fn pdf_page_count(path: &Path) -> Option<usize> {
+    let output = Command::new("pdfinfo").arg(path).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().find_map(|line| {
+        line.strip_prefix("Pages:")
+            .and_then(|rest| rest.trim().parse::<usize>().ok())
+    })
+}
+
+fn render_pdf_page_image(
+    path: &Path,
+    page: usize,
+    cols: usize,
+    rows: usize,
+) -> Option<Vec<String>> {
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+    let prefix =
+        std::env::temp_dir().join(format!("ocean-pdf-{}-{}", std::process::id(), page + 1));
+    let png_path = prefix.with_extension("png");
+    let page_arg = (page + 1).to_string();
+    let rendered = Command::new("pdftoppm")
+        .args([
+            "-png",
+            "-r",
+            "140",
+            "-f",
+            &page_arg,
+            "-l",
+            &page_arg,
+            "-singlefile",
+        ])
+        .arg(path)
+        .arg(&prefix)
+        .output();
+    if !rendered.is_ok_and(|output| output.status.success() && png_path.exists()) {
+        return None;
+    }
+
+    let size = format!("{cols}x{rows}");
+    let output = Command::new("chafa")
+        .args([
+            "--format",
+            "symbols",
+            "--colors",
+            "256",
+            "--animate",
+            "off",
+            "--size",
+            &size,
+        ])
+        .arg(&png_path)
+        .output();
+    let _ = std::fs::remove_file(&png_path);
+
+    let output = output.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(text.lines().map(str::to_string).collect())
 }
 
 pub fn extract_pdf_pages(path: &Path) -> Vec<Vec<String>> {
@@ -122,7 +199,11 @@ fn extract_raw_pdf_text(bytes: &[u8]) -> String {
 
 pub struct PdfViewer {
     pub file_name: String,
+    pub pdf_path: PathBuf,
     pub pages: Vec<Vec<String>>,
+    pub image_mode: bool,
+    pub image_cache: HashMap<(usize, usize, usize), Vec<String>>,
+    pub visible_line_count: usize,
     pub current_page: usize,
     pub scroll_offset: usize,
     pub search_query: Option<String>,
@@ -153,9 +234,17 @@ impl PdfViewer {
                             self.scroll_offset = 0;
                         }
                     }
+                    Key::Char('t') | Key::Char('T') => {
+                        self.image_mode = !self.image_mode;
+                        self.scroll_offset = 0;
+                        if self.image_mode && !image_tools_available() {
+                            self.image_mode = false;
+                        }
+                    }
                     Key::Char('j') | Key::Down => {
-                        let page_lines = self.pages[self.current_page].len();
-                        let max_scroll = page_lines.saturating_sub(rows.saturating_sub(2));
+                        let max_scroll = self
+                            .visible_line_count
+                            .saturating_sub(rows.saturating_sub(2));
                         if self.scroll_offset < max_scroll {
                             self.scroll_offset += 1;
                         } else if self.current_page + 1 < self.pages.len() {
@@ -168,14 +257,14 @@ impl PdfViewer {
                             self.scroll_offset -= 1;
                         } else if self.current_page > 0 {
                             self.current_page -= 1;
-                            let prev_len = self.pages[self.current_page].len();
-                            self.scroll_offset = prev_len.saturating_sub(rows.saturating_sub(2));
+                            self.scroll_offset = self.visible_line_count;
                         }
                     }
                     Key::Char('d') | Key::Ctrl('d') => {
                         let step = (rows / 2).max(1);
-                        let page_lines = self.pages[self.current_page].len();
-                        let max_scroll = page_lines.saturating_sub(rows.saturating_sub(2));
+                        let max_scroll = self
+                            .visible_line_count
+                            .saturating_sub(rows.saturating_sub(2));
                         self.scroll_offset = (self.scroll_offset + step).min(max_scroll);
                     }
                     Key::Char('u') | Key::Ctrl('u') => {
@@ -191,6 +280,8 @@ impl PdfViewer {
                         self.scroll_offset = 0;
                     }
                     Key::Char('/') => {
+                        self.image_mode = false;
+                        self.scroll_offset = 0;
                         if let Some(query) = self.prompt_search(&mut term, cols, rows)? {
                             if !query.is_empty() {
                                 self.search_query = Some(query.clone());
@@ -276,18 +367,42 @@ impl PdfViewer {
         }
     }
 
-    fn render(&self, cols: usize, rows: usize) -> io::Result<()> {
+    fn page_lines(&mut self, cols: usize, rows: usize) -> Vec<String> {
+        let content_rows = rows.saturating_sub(2).max(1);
+        if self.image_mode {
+            let key = (self.current_page, cols, content_rows);
+            if let Some(lines) = self.image_cache.get(&key) {
+                return lines.clone();
+            }
+            if let Some(lines) =
+                render_pdf_page_image(&self.pdf_path, self.current_page, cols, content_rows)
+            {
+                let lines: Vec<String> = lines.into_iter().take(content_rows).collect();
+                self.image_cache.insert(key, lines.clone());
+                return lines;
+            }
+            self.image_mode = false;
+        }
+        self.pages
+            .get(self.current_page)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn render(&mut self, cols: usize, rows: usize) -> io::Result<()> {
         let mut out = String::with_capacity(cols * rows * 4);
         out.push_str("\x1b[H\x1b[?25l");
 
         let total_pages = self.pages.len();
         let curr_page_num = self.current_page + 1;
-        let page_lines = &self.pages[self.current_page];
+        let page_lines = self.page_lines(cols, rows);
+        self.visible_line_count = page_lines.len();
 
         // Header
+        let mode = if self.image_mode { "IMAGE" } else { "TEXT" };
         let header_left = format!(
-            " 📄 PDF: {} | Page {}/{} ",
-            self.file_name, curr_page_num, total_pages
+            " 📄 PDF: {} | Page {}/{} | {} ",
+            self.file_name, curr_page_num, total_pages, mode
         );
         let pad = cols.saturating_sub(header_left.chars().count());
         out.push_str("\x1b[7m\x1b[1m");
@@ -302,7 +417,9 @@ impl PdfViewer {
             out.push_str("\x1b[K");
             if line_idx < page_lines.len() {
                 let line = &page_lines[line_idx];
-                if let Some(query) = &self.search_query {
+                if !self.image_mode
+                    && let Some(query) = &self.search_query
+                {
                     out.push_str(&highlight_search(line, query));
                 } else {
                     out.push_str(line);
@@ -313,7 +430,7 @@ impl PdfViewer {
 
         // Footer
         let footer_left = format!(
-            " [Page {}/{}] (Line {}/{}) | [n/p] Page  [j/k] Scroll  [/] Search  [g/G] First/Last  [q] Quit",
+            " [Page {}/{}] (Line {}/{}) | [n/p] Page  [j/k] Scroll  [t] Image/Text  [/] Search  [g/G] First/Last  [q] Quit",
             curr_page_num,
             total_pages,
             (self.scroll_offset + 1).min(page_lines.len()),

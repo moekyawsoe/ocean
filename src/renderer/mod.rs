@@ -886,34 +886,13 @@ impl RenderEngine {
         let layout = menubar.layout(vp.x, vp.y, vp.w, cw, ch, sf);
         let bg = config.colors.background;
         let fg = config.colors.foreground;
-        let is_dark = bg.relative_luminance() < 0.35;
-        let bar_bg = if is_dark {
-            Rgb::new(
-                bg.r.saturating_add(8),
-                bg.g.saturating_add(11),
-                bg.b.saturating_add(16),
-            )
-        } else {
-            Rgb::new(
-                bg.r.saturating_sub(12),
-                bg.g.saturating_sub(10),
-                bg.b.saturating_sub(8),
-            )
-        };
 
         self.bg_instances.push(QuadInstance::solid(
             layout.bar.x,
             layout.bar.y,
             layout.bar.w,
             menu_h,
-            bar_bg.to_f32_rgba(0.99),
-        ));
-        self.fg_instances.push(QuadInstance::solid(
-            layout.bar.x,
-            layout.bar.y + menu_h - 1.0,
-            layout.bar.w,
-            1.0,
-            fg.to_f32_rgba(0.14),
+            bg.to_f32_rgba(1.0),
         ));
 
         let pad = (12.0 * sf).round();
@@ -965,7 +944,7 @@ impl RenderEngine {
                 panel.y,
                 panel.w,
                 panel.h,
-                bar_bg.to_f32_rgba(0.995),
+                bg.to_f32_rgba(0.995),
             ));
             self.overlay_instances.push(QuadInstance::hollow(
                 panel.x,
