@@ -6,6 +6,7 @@ use winit::keyboard::{Key, NamedKey};
 pub enum MenuAction {
     NewFile,
     OpenFile,
+    OpenEditorWindow,
     SaveFile,
     CloseFile,
     Quit,
@@ -15,6 +16,8 @@ pub enum MenuAction {
     CommandPalette,
     ToggleExplorer,
     ToggleProblems,
+    GitChanges,
+    ShowGitDiff,
     ToggleStatusBar,
     ToggleMenuBar,
     ToggleSplit,
@@ -104,6 +107,12 @@ impl MenuBar {
         let mut file_entries = vec![
             entry("New File", "", MenuAction::NewFile, true),
             entry("Open File...", "Ctrl+P", MenuAction::OpenFile, true),
+            entry(
+                "Open Editor in New Window",
+                "Ctrl+Shift+O",
+                MenuAction::OpenEditorWindow,
+                true,
+            ),
             entry("Save", "Ctrl+S", MenuAction::SaveFile, true),
             entry("Close File", "Ctrl+W", MenuAction::CloseFile, true),
         ];
@@ -151,6 +160,8 @@ impl MenuBar {
                 entries: vec![
                     entry("Explorer", "Ctrl+B", MenuAction::ToggleExplorer, true),
                     entry("Problems", "", MenuAction::ToggleProblems, true),
+                    entry("Git Changes", "Ctrl+Shift+G", MenuAction::GitChanges, true),
+                    entry("Show Git Diff", "", MenuAction::ShowGitDiff, true),
                     entry(
                         "Status Bar",
                         "Ctrl+Shift+B",

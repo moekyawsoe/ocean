@@ -1,6 +1,9 @@
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use rustc_hash::FxHashMap;
+use hashbrown::Equivalent;
+use hashbrown::HashMap as BrownHashMap;
+use rustc_hash::FxBuildHasher;
 use rustybuzz::UnicodeBuffer;
 
 use crate::config::ZawgyiMode;
@@ -77,8 +80,51 @@ struct RunCacheKey {
     font_px_bits: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RunCacheKeyRef<'a> {
+    text: &'a str,
+    rel_cols: &'a [u16],
+    span_cols: u16,
+    font_id: usize,
+    is_myanmar: bool,
+    zawgyi_rank: u8,
+    cell_w_bits: u32,
+    font_px_bits: u32,
+}
+
+impl Hash for RunCacheKeyRef<'_> {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.text.hash(state);
+        self.rel_cols.hash(state);
+        self.span_cols.hash(state);
+        self.font_id.hash(state);
+        self.is_myanmar.hash(state);
+        self.zawgyi_rank.hash(state);
+        self.cell_w_bits.hash(state);
+        self.font_px_bits.hash(state);
+    }
+}
+
+impl Equivalent<RunCacheKey> for RunCacheKeyRef<'_> {
+    #[inline]
+    fn equivalent(&self, key: &RunCacheKey) -> bool {
+        self.span_cols == key.span_cols
+            && self.font_id == key.font_id
+            && self.is_myanmar == key.is_myanmar
+            && self.zawgyi_rank == key.zawgyi_rank
+            && self.cell_w_bits == key.cell_w_bits
+            && self.font_px_bits == key.font_px_bits
+            && self.text == key.text
+            && self.rel_cols == key.rel_cols.as_slice()
+    }
+}
+
 pub struct TextShaper {
-    cache: FxHashMap<RunCacheKey, Arc<Vec<CachedGlyph>>>,
+    cache: BrownHashMap<RunCacheKey, Arc<Vec<CachedGlyph>>, FxBuildHasher>,
+    prev_cache: BrownHashMap<RunCacheKey, Arc<Vec<CachedGlyph>>, FxBuildHasher>,
+    scratch_text: String,
+    scratch_rel_cols: Vec<u16>,
 }
 
 impl Default for TextShaper {
@@ -90,12 +136,16 @@ impl Default for TextShaper {
 impl TextShaper {
     pub fn new() -> Self {
         Self {
-            cache: FxHashMap::with_capacity_and_hasher(2048, Default::default()),
+            cache: BrownHashMap::with_capacity_and_hasher(2048, FxBuildHasher),
+            prev_cache: BrownHashMap::with_capacity_and_hasher(1024, FxBuildHasher),
+            scratch_text: String::with_capacity(256),
+            scratch_rel_cols: Vec::with_capacity(256),
         }
     }
 
     pub fn clear_cache(&mut self) {
         self.cache.clear();
+        self.prev_cache.clear();
     }
 
     /// Shape an entire terminal row into positioned GPU-ready glyphs.
@@ -107,8 +157,11 @@ impl TextShaper {
         out: &mut Vec<PositionedGlyph>,
     ) {
         out.clear();
-        if self.cache.len() > 8192 {
-            self.cache.clear();
+        if self.cache.len() > 6144 {
+            // Generational cache shift: instead of hard-clearing all entries and causing
+            // a full-screen re-shaping stall, demote current cache to prev_cache.
+            // Actively referenced entries on screen will promote back with zero lag spikes.
+            self.prev_cache = std::mem::take(&mut self.cache);
         }
 
         let num_cols = cells.len();
@@ -223,8 +276,8 @@ impl TextShaper {
         out: &mut Vec<PositionedGlyph>,
     ) {
         let span_cols = seg_cells.len() as u16;
-        let mut raw_text = String::with_capacity(seg_cells.len() * 4);
-        let mut rel_cols = Vec::with_capacity(seg_cells.len() * 2);
+        self.scratch_text.clear();
+        self.scratch_rel_cols.clear();
 
         for (rel_idx, cell) in seg_cells.iter().enumerate() {
             if cell.is_wide_spacer {
@@ -232,16 +285,16 @@ impl TextShaper {
             }
             let rc = rel_idx as u16;
             if cell.c != '\0' {
-                raw_text.push(cell.c);
-                rel_cols.push(rc);
+                self.scratch_text.push(cell.c);
+                self.scratch_rel_cols.push(rc);
             }
             for &zw in cell.zerowidth {
-                raw_text.push(zw);
-                rel_cols.push(rc);
+                self.scratch_text.push(zw);
+                self.scratch_rel_cols.push(rc);
             }
         }
 
-        if raw_text.is_empty() {
+        if self.scratch_text.is_empty() {
             return;
         }
 
@@ -251,21 +304,48 @@ impl TextShaper {
             font_sys.metrics.font_px
         };
         let cell_w = font_sys.metrics.cell_width;
+        let zawgyi_rank = if is_myanmar { zawgyi_mode as u8 } else { 0 };
+        let cell_w_bits = cell_w.to_bits();
+        let font_px_bits = font_px.to_bits();
 
-        let key = RunCacheKey {
-            text: raw_text,
-            rel_cols,
+        let key_ref = RunCacheKeyRef {
+            text: &self.scratch_text,
+            rel_cols: &self.scratch_rel_cols,
             span_cols,
             font_id,
             is_myanmar,
-            zawgyi_rank: if is_myanmar { zawgyi_mode as u8 } else { 0 },
-            cell_w_bits: cell_w.to_bits(),
-            font_px_bits: font_px.to_bits(),
+            zawgyi_rank,
+            cell_w_bits,
+            font_px_bits,
         };
 
-        let cached = if let Some(hit) = self.cache.get(&key) {
+        let cached = if let Some(hit) = self.cache.get(&key_ref) {
             Arc::clone(hit)
+        } else if let Some(hit) = self.prev_cache.get(&key_ref) {
+            let hit_clone = Arc::clone(hit);
+            let key = RunCacheKey {
+                text: self.scratch_text.clone(),
+                rel_cols: self.scratch_rel_cols.clone(),
+                span_cols,
+                font_id,
+                is_myanmar,
+                zawgyi_rank,
+                cell_w_bits,
+                font_px_bits,
+            };
+            self.cache.insert(key, Arc::clone(&hit_clone));
+            hit_clone
         } else {
+            let key = RunCacheKey {
+                text: self.scratch_text.clone(),
+                rel_cols: self.scratch_rel_cols.clone(),
+                span_cols,
+                font_id,
+                is_myanmar,
+                zawgyi_rank,
+                cell_w_bits,
+                font_px_bits,
+            };
             let computed = Arc::new(shape_uncached(font_sys, &key, font_px, cell_w));
             self.cache.insert(key, Arc::clone(&computed));
             computed
@@ -338,8 +418,8 @@ fn shape_uncached(
     let mut byte_pos = 0;
     for (ch, &rc) in shaped_text.chars().zip(char_rel_cols.iter()) {
         let clen = ch.len_utf8();
-        for b in byte_pos..byte_pos + clen {
-            byte_to_rel_col[b] = rc;
+        for item in byte_to_rel_col.iter_mut().skip(byte_pos).take(clen) {
+            *item = rc;
         }
         byte_pos += clen;
     }

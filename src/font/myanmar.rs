@@ -296,7 +296,7 @@ pub fn is_likely_zawgyi(s: &str) -> bool {
                 {
                     zg_score += 3;
                 }
-                Some('\u{1000}'..='\u{1021}') => {
+                Some('\u{1000}'..='\u{1021}')
                     // Could be Unicode stacked consonant OR Zawgyi asat followed by next syllable!
                     // Check if preceded by vowel (Zawgyi: consonant + vowel + 1039 asat)
                     if idx > 0
@@ -304,10 +304,9 @@ pub fn is_likely_zawgyi(s: &str) -> bool {
                             chars[idx - 1],
                             '\u{102B}'..='\u{1032}' | '\u{1036}' | '\u{103D}'
                         )
-                    {
+                    => {
                         zg_score += 3;
                     }
-                }
                 _ => {}
             }
         }

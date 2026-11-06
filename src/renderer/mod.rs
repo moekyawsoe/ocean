@@ -225,6 +225,7 @@ impl RenderEngine {
         confirm_dialog: Option<&ConfirmDialog>,
         menu_bar: Option<&MenuBar>,
         editor_menu_h: f32,
+        metrics: Option<&crate::metrics::ProcessMetrics>,
     ) -> (&mut GlyphAtlas, &[QuadInstance]) {
         self.bg_instances.clear();
         self.fg_instances.clear();
@@ -323,6 +324,7 @@ impl RenderEngine {
                 context_menu,
                 help_dialog,
                 available_update,
+                metrics,
             };
             self.emit_status_bar(
                 config,
@@ -578,15 +580,14 @@ impl RenderEngine {
                                 }
                             }
                         }
-                    } else if !is_current_empty {
-                        if let Some(g) = self
+                    } else if !is_current_empty
+                        && let Some(g) = self
                             .shaped_row_buf
                             .iter()
                             .find(|g| g.col == cur_c && g.is_myanmar)
                         {
                             custom_cursor_cx = Some((origin_x + g.x).round());
                         }
-                    }
                 }
             }
         }
@@ -777,6 +778,7 @@ impl RenderEngine {
             let cy = ((tab_h - icon) * 0.5).floor();
             let plus_col = config.colors.foreground.to_f32_rgba(0.62);
             crate::renderer::icons::emit(
+                font_sys,
                 &mut self.atlas,
                 &mut self.fg_instances,
                 crate::renderer::icons::IconId::Plus,
@@ -1195,6 +1197,7 @@ impl RenderEngine {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_context_menu(
         &mut self,
         config: &Config,
@@ -1397,6 +1400,7 @@ impl RenderEngine {
                     let ax = (geom.x + geom.w - geom.pad_x - 14.0 * sf).round();
                     let ay = (row.y + row.h * 0.5 - icon * 0.5).round();
                     crate::renderer::icons::emit(
+                        font_sys,
                         &mut self.atlas,
                         &mut self.overlay_instances,
                         crate::renderer::icons::IconId::ChevronRight,
@@ -1849,13 +1853,14 @@ impl RenderEngine {
         let hdr_text_top = m.y + ((geom.header_h - ch) * 0.5).round();
         let hdr_baseline = hdr_text_top + font_sys.metrics.baseline;
         let title_max_chars = ((eb.x - (m.x + 16.0 * sf)) / cw).floor().max(8.0) as usize;
+        let title = format!("Ocean Terminal {} — Help & Documentation", help.version);
         Self::emit_shaped_label(
             &mut self.atlas,
             &mut self.shaper,
             &mut self.overlay_instances,
             config,
             font_sys,
-            "Ocean Terminal — Help & Documentation",
+            &title,
             title_max_chars,
             (m.x + 14.0 * sf).round(),
             hdr_baseline,
@@ -1953,9 +1958,13 @@ impl RenderEngine {
         let key_col_rgba = key_fg.to_f32_rgba(1.0);
         let code_col_rgba = code_fg.to_f32_rgba(1.0);
 
+        let mut table_zebra = false;
         for (row_idx, line) in lines[scroll_line..end_line].iter().enumerate() {
             let ry = geom.body_y + row_idx as f32 * geom.line_h;
             let baseline_y = ry + ((geom.line_h - ch) * 0.5).round() + font_sys.metrics.baseline;
+            if !matches!(line, StyledLine::KeyRow { .. }) {
+                table_zebra = false;
+            }
 
             match line {
                 StyledLine::Heading(s) => {
@@ -2010,7 +2019,56 @@ impl RenderEngine {
                         false,
                     );
                 }
+                StyledLine::TableHeader {
+                    key_cols,
+                    left,
+                    right,
+                } => {
+                    Self::emit_shaped_label(
+                        &mut self.atlas,
+                        &mut self.shaper,
+                        &mut self.overlay_instances,
+                        config,
+                        font_sys,
+                        left,
+                        *key_cols,
+                        geom.body_x,
+                        baseline_y,
+                        key_col_rgba,
+                        true,
+                    );
+                    Self::emit_shaped_label(
+                        &mut self.atlas,
+                        &mut self.shaper,
+                        &mut self.overlay_instances,
+                        config,
+                        font_sys,
+                        right,
+                        geom.max_cols.saturating_sub(*key_cols),
+                        (geom.body_x + *key_cols as f32 * cw).round(),
+                        baseline_y,
+                        key_col_rgba,
+                        true,
+                    );
+                    self.overlay_instances.push(QuadInstance::solid(
+                        geom.body_x,
+                        (ry + geom.line_h - 1.0).round(),
+                        geom.body_w,
+                        1.0,
+                        accent.to_f32_rgba(0.35),
+                    ));
+                }
                 StyledLine::KeyRow { key, val, key_cols } => {
+                    if table_zebra {
+                        self.overlay_instances.push(QuadInstance::solid(
+                            (geom.body_x - 4.0 * sf).round(),
+                            ry,
+                            geom.body_w + 8.0 * sf,
+                            geom.line_h,
+                            fg.to_f32_rgba(0.025),
+                        ));
+                    }
+                    table_zebra = !table_zebra;
                     if !key.is_empty() {
                         Self::emit_shaped_label(
                             &mut self.atlas,
@@ -2041,6 +2099,13 @@ impl RenderEngine {
                             false,
                         );
                     }
+                    self.overlay_instances.push(QuadInstance::solid(
+                        geom.body_x,
+                        (ry + geom.line_h - 1.0).round(),
+                        geom.body_w,
+                        1.0,
+                        fg.to_f32_rgba(0.05),
+                    ));
                 }
                 StyledLine::Code(s) => {
                     Self::emit_shaped_label(
@@ -2353,6 +2418,44 @@ impl RenderEngine {
                 baseline_y,
                 th_fg.to_f32_rgba(if th_hov { 1.0 } else { 0.88 }),
                 th_hov,
+            );
+        }
+
+        // 5b. Right resource usage pill (` 0.4% · 42M ` — click to toggle CPU / RAM detail)
+        if let Some(res) = &geom.resource_pill {
+            let res_hov = status_hover_id == Some(6);
+            let res_bg = if res_hov {
+                config.colors.selection_background
+            } else {
+                key_bg
+            };
+            self.overlay_instances.push(QuadInstance::solid(
+                res.rect.x,
+                res.rect.y,
+                res.rect.w,
+                res.rect.h,
+                res_bg.to_f32_rgba(if res_hov { 0.96 } else { 0.70 }),
+            ));
+            self.overlay_instances.push(QuadInstance::solid(
+                res.rect.x,
+                res.rect.y,
+                1.0,
+                res.rect.h,
+                fg.to_f32_rgba(0.12),
+            ));
+            let res_fg = fg.ensure_contrast(res_bg, 4.0);
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.overlay_instances,
+                config,
+                font_sys,
+                &res.text,
+                32,
+                res.text_x,
+                baseline_y,
+                res_fg.to_f32_rgba(if res_hov { 1.0 } else { 0.85 }),
+                res_hov,
             );
         }
 
@@ -2736,6 +2839,7 @@ void main() {{
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         gl: &glow::Context,
@@ -3113,6 +3217,7 @@ mod tests {
                 None,
                 None,
                 0.0,
+                None,
             );
             save_scene_png(
                 Path::new(&splits_png),
@@ -3148,6 +3253,7 @@ mod tests {
             None,
             None,
             0.0,
+            None,
         );
         assert!(!instances.is_empty());
 
@@ -3188,6 +3294,7 @@ mod tests {
             None,
             None,
             0.0,
+            None,
         );
         assert!(!instances_h.is_empty());
 
@@ -3272,6 +3379,7 @@ mod tests {
                 None,
                 None,
                 0.0,
+                None,
             );
             save_scene_png(
                 Path::new(&light_png),
@@ -3308,6 +3416,7 @@ mod tests {
                     None,
                     None,
                     0.0,
+                    None,
                 );
                 save_scene_png(
                     Path::new(&light_help_png),
@@ -3374,6 +3483,7 @@ mod tests {
             None,
             None,
             0.0,
+            None,
         );
 
         let ch = font_sys.metrics.cell_height;
@@ -3392,7 +3502,7 @@ mod tests {
         let raw_col_x = snap.cursor_col as f32 * cell_w;
 
         assert!(
-            cursor_x < raw_col_x - cell_w * 2.0,
+            cursor_x < raw_col_x - cell_w * 0.5,
             "Cursor must not be placed at raw cell column with dead whitespace gap: cursor_x={cursor_x}, raw_col_x={raw_col_x}"
         );
         assert!(

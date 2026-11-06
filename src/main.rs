@@ -7,6 +7,7 @@ mod help;
 mod ipc;
 mod menu;
 mod menubar;
+pub mod metrics;
 mod plugins;
 mod renderer;
 mod session;
@@ -45,6 +46,7 @@ pub struct ParsedCli {
     pub cli_overrides: Vec<(String, String)>,
     pub editor_file: Option<PathBuf>,
     pub initial_editor_mode: bool,
+    pub new_editor_window: bool,
     pub print_help: bool,
     pub print_version: bool,
 }
@@ -64,6 +66,7 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
     let is_edit_binary = prog_name.ends_with("/edit") || prog_name == "edit";
     let mut editor_file: Option<PathBuf> = None;
     let mut initial_editor_mode = is_edit_binary;
+    let mut window_choice: Option<bool> = None;
     let mut print_help = false;
     let mut print_version = false;
 
@@ -73,6 +76,9 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
         match arg.as_str() {
             "edit" => {
                 initial_editor_mode = true;
+                if window_choice.is_none() {
+                    window_choice = Some(true);
+                }
                 if i + 1 < args.len()
                     && !args[i + 1].starts_with('-')
                     && !args[i + 1].starts_with('+')
@@ -81,6 +87,14 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
                     i += 2;
                     continue;
                 }
+            }
+            "-w" | "--window" | "--editor-window" => {
+                initial_editor_mode = true;
+                window_choice = Some(true);
+            }
+            "--here" | "--current-window" | "--in-place" => {
+                initial_editor_mode = true;
+                window_choice = Some(false);
             }
             "-h" | "--help" | "+help" => {
                 print_help = true;
@@ -177,11 +191,10 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
                     continue;
                 }
             }
-            s if !s.starts_with('-') && !s.starts_with('+') => {
-                if initial_editor_mode && editor_file.is_none() {
+            s if !s.starts_with('-') && !s.starts_with('+')
+                && initial_editor_mode && editor_file.is_none() => {
                     editor_file = Some(PathBuf::from(s));
                 }
-            }
             _ => {}
         }
         i += 1;
@@ -208,6 +221,7 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
         cli_overrides,
         editor_file,
         initial_editor_mode,
+        new_editor_window: window_choice.unwrap_or(is_edit_binary),
         print_help,
         print_version,
     }
@@ -239,7 +253,10 @@ fn main() {
 
     // `edit` inside an Ocean shell should reuse the current window and switch
     // that pane's window into editor mode instead of spawning a new window.
-    if cli.initial_editor_mode && crate::ipc::try_send_edit_request(cli.editor_file.as_deref()) {
+    if cli.initial_editor_mode
+        && !cli.new_editor_window
+        && crate::ipc::try_send_edit_request(cli.editor_file.as_deref())
+    {
         return;
     }
 
@@ -321,6 +338,25 @@ fn main() {
 
 fn run_plus_action(act: &str, config: &Config, force: bool, args: &[String]) {
     match act {
+        "+editor-window" | "+new-editor-window" => {
+            let Ok(exe) = std::env::current_exe() else {
+                eprintln!("Could not resolve the Ocean executable.");
+                std::process::exit(1);
+            };
+            let mut cmd = Command::new(exe);
+            if let Some(path) = &config.loaded_path {
+                cmd.arg("--config-file").arg(path);
+            }
+            cmd.arg(format!("--theme={}", config.theme_name));
+            cmd.arg("--editor-window");
+            if let Some(path) = args.first() {
+                cmd.arg(path);
+            }
+            if let Err(err) = cmd.spawn() {
+                eprintln!("Failed opening a separate editor window: {err}");
+                std::process::exit(1);
+            }
+        }
         "+list-themes" => {
             println!(
                 "Built-in themes — 5 Dark + 5 Light (use `theme = <name>` in config or Right-Click -> Switch Theme):"
@@ -826,6 +862,7 @@ fn run_screenshot(
             None,
             None,
             0.0,
+            None,
         );
 
         return save_scene_png(
@@ -908,6 +945,7 @@ fn run_screenshot(
         None,
         None,
         0.0,
+        None,
     );
 
     save_scene_png(
@@ -996,11 +1034,14 @@ ocean {} — Clean, lightweight GPU terminal and built-in code editor with full 
 USAGE:
     ocean [OPTIONS] [-e <COMMAND> [ARGS...]]
     ocean edit [PATH]
+    ocean edit --here [PATH]
     edit [PATH]
     ocean +<ACTION>
 
 COMMANDS:
-    edit [PATH]                    Open built-in code editor directly (or run standalone `edit`)
+    edit [PATH]                    Open the built-in code editor in a separate window
+    edit --here [PATH]             Open the editor in the current window (IPC when inside Ocean)
+    edit --window [PATH]           Explicitly open the editor in a separate window
 
 OPTIONS:
     -c, --config-file <PATH>       Load Ghostty-style config from PATH
@@ -1022,6 +1063,7 @@ ACTIONS (Ghostty-style):
     +list-fonts                    List discovered Monospace and Myanmar/Burmese fonts
     +list-themes                   List built-in color themes
     +myanmar-check                 Verify OpenType Myanmar shaping on system fonts
+    +editor-window [PATH]          Open the built-in editor in a separate window
     +plugins-dir                   Print the installed plugin directory
     +plugin-list                   List installed WASM plugins and enabled state
     +plugin-install <path|url>     Install a .wasm plugin from disk or HTTPS URL (--force)
@@ -1045,6 +1087,7 @@ mod tests {
     fn test_edit_binary_no_args_opens_cwd() {
         let cli = parse_cli_args("edit", &[]);
         assert!(cli.initial_editor_mode);
+        assert!(cli.new_editor_window);
         assert!(cli.editor_file.is_some());
         let cur = std::env::current_dir().unwrap();
         assert_eq!(cli.editor_file.unwrap(), cur);
@@ -1068,6 +1111,7 @@ mod tests {
     fn test_ocean_edit_subcommand_no_args() {
         let cli = parse_cli_args("ocean", &[String::from("edit")]);
         assert!(cli.initial_editor_mode);
+        assert!(cli.new_editor_window);
         assert!(cli.editor_file.is_some());
         let cur = std::env::current_dir().unwrap();
         assert_eq!(cli.editor_file.unwrap(), cur);
@@ -1077,6 +1121,45 @@ mod tests {
     fn test_ocean_edit_subcommand_with_path() {
         let cli = parse_cli_args("ocean", &[String::from("edit"), String::from("Cargo.toml")]);
         assert!(cli.initial_editor_mode);
+        assert!(cli.new_editor_window);
+        assert_eq!(cli.editor_file, Some(PathBuf::from("Cargo.toml")));
+    }
+
+    #[test]
+    fn test_ocean_edit_here_flag() {
+        let cli = parse_cli_args(
+            "ocean",
+            &[
+                String::from("edit"),
+                String::from("--here"),
+                String::from("Cargo.toml"),
+            ],
+        );
+        assert!(cli.initial_editor_mode);
+        assert!(!cli.new_editor_window);
+        assert_eq!(cli.editor_file, Some(PathBuf::from("Cargo.toml")));
+    }
+
+    #[test]
+    fn test_ocean_edit_window_flag() {
+        let cli = parse_cli_args(
+            "ocean",
+            &[
+                String::from("edit"),
+                String::from("--window"),
+                String::from("src/main.rs"),
+            ],
+        );
+        assert!(cli.initial_editor_mode);
+        assert!(cli.new_editor_window);
+        assert_eq!(cli.editor_file, Some(PathBuf::from("src/main.rs")));
+
+        let cli = parse_cli_args(
+            "ocean",
+            &[String::from("--editor-window"), String::from("Cargo.toml")],
+        );
+        assert!(cli.initial_editor_mode);
+        assert!(cli.new_editor_window);
         assert_eq!(cli.editor_file, Some(PathBuf::from("Cargo.toml")));
     }
 

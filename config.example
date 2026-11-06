@@ -13,13 +13,15 @@
 # Dedicated Myanmar / Burmese Unicode font (`Padauk`, `Pyidaungsu`, `Noto Sans Myanmar`, etc.)
 # Automatically discovered if omitted.
 font-family-myanmar = Padauk
-myanmar-font-scale = 0.96
+myanmar-font-scale = 1.12
 
 # Optional legacy Zawgyi-One display conversion: `off` (default), `auto`, or `force`.
 # Toggle live anytime with `Ctrl+Shift+M`.
 myanmar-zawgyi = off
 
 font-size = 13.5
+# Separate editor windows use this fraction of `font-size` (0.5–1.5).
+editor-font-scale = 0.92
 font-thicken = false
 # font-feature = -calt
 
@@ -137,6 +139,7 @@ keybind = ctrl+shift+w=close_surface
 keybind = ctrl+tab=next_tab
 keybind = ctrl+shift+tab=previous_tab
 keybind = ctrl+shift+n=new_window
+keybind = ctrl+shift+o=open_editor_window
 keybind = ctrl+shift+comma=reload_config
 keybind = ctrl+shift+r=reload_config
 keybind = ctrl+shift+m=toggle_myanmar_zawgyi

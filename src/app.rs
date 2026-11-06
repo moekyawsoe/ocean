@@ -124,6 +124,7 @@ pub struct OceanApp {
     pub proxy: EventLoopProxy<AppEvent>,
     pub wakeup_queued: Arc<AtomicBool>,
     pub editor: crate::editor::EditorWorkspace,
+    pub metrics: crate::metrics::ProcessMetrics,
     ipc_socket: Option<PathBuf>,
 
     gl_state: Option<GlState>,
@@ -172,10 +173,13 @@ pub struct OceanApp {
 
 impl OceanApp {
     pub fn new(
-        config: Config,
+        mut config: Config,
         launch_opts: LaunchOptions,
         proxy: EventLoopProxy<AppEvent>,
     ) -> Self {
+        if launch_opts.initial_editor_mode || launch_opts.editor_file.is_some() {
+            config.font_size = (config.font_size * config.editor_font_scale).max(6.0);
+        }
         let base_font_size = config.font_size;
         let past = Instant::now() - Duration::from_secs(5);
         crate::update::start_background_update_check(
@@ -220,23 +224,16 @@ impl OceanApp {
                 let _ = editor.open_file(ed_path, proxy.clone());
                 let folder = ed_path
                     .parent()
-                    .and_then(|p| {
-                        if p.as_os_str().is_empty() {
-                            None
-                        } else {
-                            Some(p)
-                        }
-                    })
-                    .or_else(|| launch_cwd.as_deref())
+                    .filter(|&p| !p.as_os_str().is_empty())
+                    .or(launch_cwd.as_deref())
                     .unwrap_or_else(|| std::path::Path::new("."));
                 editor.open_folder(folder);
             }
         } else if restored_session {
-            if editor.workspace_dir.as_os_str().is_empty() {
-                if let Some(ref cwd) = launch_cwd {
+            if editor.workspace_dir.as_os_str().is_empty()
+                && let Some(ref cwd) = launch_cwd {
                     editor.open_folder(cwd);
                 }
-            }
         } else if let Some(ref cwd) = launch_cwd {
             editor.open_folder(cwd);
         } else {
@@ -253,6 +250,7 @@ impl OceanApp {
             proxy,
             wakeup_queued: Arc::new(AtomicBool::new(false)),
             editor,
+            metrics: crate::metrics::ProcessMetrics::new(),
             ipc_socket,
             gl_state: None,
             font_sys: None,
@@ -961,6 +959,7 @@ impl OceanApp {
             context_menu: self.context_menu.as_ref(),
             help_dialog: self.help_dialog.as_ref(),
             available_update: self.available_update.as_ref(),
+            metrics: Some(&self.metrics),
         };
         StatusBarGeometry::compute(
             &self.config,
@@ -1066,12 +1065,11 @@ impl OceanApp {
             if self.config.theme_name != theme_id {
                 self.apply_theme_preview(&theme_id);
             }
-        } else if let Some(orig) = &self.theme_before_preview {
-            if &self.config.theme_name != orig {
+        } else if let Some(orig) = &self.theme_before_preview
+            && &self.config.theme_name != orig {
                 let orig_clone = orig.clone();
                 self.apply_theme_preview(&orig_clone);
             }
-        }
     }
 
     fn apply_theme_preview(&mut self, name: &str) {
@@ -1084,11 +1082,10 @@ impl OceanApp {
 
     fn close_context_menu(&mut self) {
         self.context_menu = None;
-        if let Some(orig) = self.theme_before_preview.take() {
-            if self.config.theme_name != orig {
+        if let Some(orig) = self.theme_before_preview.take()
+            && self.config.theme_name != orig {
                 self.apply_theme(&orig);
             }
-        }
     }
 
     fn apply_theme(&mut self, name: &str) {
@@ -1147,7 +1144,10 @@ impl OceanApp {
     }
 
     fn reload_configuration(&mut self) {
-        let new_cfg = Config::load(self.launch_opts.config_path.as_deref());
+        let mut new_cfg = Config::load(self.launch_opts.config_path.as_deref());
+        if self.launch_opts.initial_editor_mode || self.launch_opts.editor_file.is_some() {
+            new_cfg.font_size = (new_cfg.font_size * new_cfg.editor_font_scale).max(6.0);
+        }
         self.base_font_size = new_cfg.font_size;
         self.config = new_cfg;
         self.editor.vim.enabled = self.config.editor_keymap == crate::config::EditorKeymap::Vim;
@@ -1340,6 +1340,30 @@ impl OceanApp {
                         cmd.arg("--config-file").arg(cfg_path);
                     }
                     cmd.arg(format!("--theme={}", self.config.theme_name));
+                    let _ = cmd.spawn();
+                }
+            }
+            Action::OpenEditorWindow => {
+                if let Ok(exe) = std::env::current_exe() {
+                    let mut cmd = Command::new(exe);
+                    if let Some(cfg_path) = &self.launch_opts.config_path {
+                        cmd.arg("--config-file").arg(cfg_path);
+                    }
+                    cmd.arg(format!("--theme={}", self.config.theme_name));
+                    cmd.arg("--editor-window");
+                    let path = self
+                        .editor
+                        .active_doc_ref()
+                        .path()
+                        .cloned()
+                        .or_else(|| {
+                            (!self.editor.workspace_dir.as_os_str().is_empty())
+                                .then(|| self.editor.workspace_dir.clone())
+                        })
+                        .or_else(|| self.inherited_cwd(false));
+                    if let Some(path) = path {
+                        cmd.arg(path);
+                    }
                     let _ = cmd.spawn();
                 }
             }
@@ -1583,6 +1607,20 @@ impl OceanApp {
                 self.editor.editor_focused = true;
                 self.editor.new_document();
             }
+            MenuAction::OpenEditorWindow => {
+                self.execute_action(Action::OpenEditorWindow, event_loop);
+            }
+            MenuAction::GitChanges => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.active_panel = crate::editor::SidebarPanel::Git;
+                self.editor.explorer.visible = true;
+                self.editor.refresh_git();
+                self.editor.editor_focused = true;
+            }
+            MenuAction::ShowGitDiff => {
+                self.editor.show_git_diff();
+                self.editor.editor_focused = true;
+            }
             MenuAction::OpenFile | MenuAction::GoToFile | MenuAction::CommandPalette => {
                 self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
                 self.editor.editor_focused = true;
@@ -1735,6 +1773,8 @@ impl OceanApp {
     }
 
     fn render_frame(&mut self) {
+        // Frame is now being serviced. Allow next PTY burst to queue the next frame wakeup.
+        self.wakeup_queued.store(false, Ordering::Release);
         if self.occluded {
             return;
         }
@@ -1806,8 +1846,8 @@ impl OceanApp {
         }
 
         // Anchor IME to editor cursor when editor is active and focused
-        if self.editor.is_active() && self.editor.editor_focused {
-            if let Some(ed_viewport) = ed_vp {
+        if self.editor.is_active() && self.editor.editor_focused
+            && let Some(ed_viewport) = ed_vp {
                 let gutter_digits = (self.editor.active_doc().buffer.len_lines() + 1)
                     .to_string()
                     .len()
@@ -1852,7 +1892,6 @@ impl OceanApp {
                     .max(0.0) as u32;
                 active_ime_px = Some((abs_cx, abs_cy));
             }
-        }
 
         // Keep IME candidate popup anchored cleanly to the active split pane's cursor
         if let Some((cur_px_x, cur_px_y)) = active_ime_px
@@ -1938,6 +1977,7 @@ impl OceanApp {
             self.confirm_dialog.as_ref(),
             Some(&self.menubar),
             editor_menu_h,
+            Some(&self.metrics),
         );
 
         gl_state.renderer.draw(
@@ -1981,6 +2021,10 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 eprintln!("ocean session autosave: {err}");
             }
         }
+
+        if self.metrics.refresh_if_needed() {
+            self.request_redraw();
+        }
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
@@ -2003,11 +2047,14 @@ impl ApplicationHandler<AppEvent> for OceanApp {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::Wakeup => {
-                self.wakeup_queued.store(false, Ordering::Release);
-                if let Some(font_sys) = &mut self.font_sys {
-                    if self.editor.poll_events(font_sys) {
-                        self.request_redraw();
-                    }
+                // Keep wakeup_queued true until render_frame() actually draws the frame.
+                // This coalesces high-frequency PTY writes from multiple split panes
+                // into a single display redraw, preventing event loop storms.
+                if self.editor.is_active()
+                    && let Some(font_sys) = &mut self.font_sys
+                    && self.editor.poll_events(font_sys)
+                {
+                    self.request_redraw();
                 }
                 self.request_redraw();
             }
@@ -2326,8 +2373,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 if let Some(action) =
                     match_keybind(&self.config.keybinds, &event.logical_key, self.modifiers)
                         .cloned()
-                {
-                    if matches!(
+                    && matches!(
                         action,
                         Action::ToggleEditor
                             | Action::ToggleSplitMode
@@ -2339,7 +2385,6 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         self.execute_action(action, event_loop);
                         return;
                     }
-                }
 
                 // If code editor is active and focused, route keys to the editor
                 if self.editor.is_active()
@@ -2349,8 +2394,8 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     let ws_dir = self
                         .inherited_cwd(false)
                         .unwrap_or_else(|| std::path::PathBuf::from("."));
-                    if let Some(font_sys) = &mut self.font_sys {
-                        if self.editor.handle_key(
+                    if let Some(font_sys) = &mut self.font_sys
+                        && self.editor.handle_key(
                             &event,
                             self.modifiers,
                             font_sys,
@@ -2369,7 +2414,6 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             self.request_redraw();
                             return;
                         }
-                    }
                 }
 
                 // Check configured Ghostty-style keybinds
@@ -2704,14 +2748,13 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             self.request_redraw();
                             return;
                         }
-                    } else if let Some(font_sys) = &mut self.font_sys {
-                        if self
+                    } else if let Some(font_sys) = &mut self.font_sys
+                        && self
                             .editor
                             .update_scrollbar_hover(px, py, &ed_vp, tab_h, font_sys)
                         {
                             self.request_redraw();
                         }
-                    }
                 }
 
                 let (layouts, dividers) = self.active_tab_layout();
@@ -2818,34 +2861,30 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         }
                     }
 
-                    if self.editor.explorer.visible && self.editor.explorer.is_open() {
-                        let sw = self.editor.explorer.width.min(_ed_vp.w - 100.0).max(80.0);
-                        let div_x = _ed_vp.x + sw;
-                        if (px - div_x).abs() <= 4.0 && py >= _ed_vp.y && py <= _ed_vp.y + _ed_vp.h
-                        {
+                    if let Some((sx, sy, sw, sh)) = self.editor.sidebar_rect(&_ed_vp) {
+                        let div_x = sx + sw;
+                        if (px - div_x).abs() <= 4.0 && py >= sy && py <= sy + sh {
+                            if self.editor.explorer.hovered_idx.is_some() {
+                                self.editor.explorer.hovered_idx = None;
+                                self.request_redraw();
+                            }
                             self.set_cursor_icon(CursorIcon::ColResize);
                             return;
                         }
-                        if px >= _ed_vp.x
-                            && px < div_x
-                            && py >= _ed_vp.y
-                            && py <= _ed_vp.y + _ed_vp.h
-                        {
+                        if px >= sx && px < div_x && py >= sy && py <= sy + sh {
                             self.set_cursor_icon(CursorIcon::Pointer);
-                            if let Some(font_sys) = &self.font_sys {
-                                let line_h = font_sys.metrics.cell_height;
-                                let header_h = (line_h + 6.0).round();
-                                let item_h = (line_h + 3.0).round();
-                                self.editor
-                                    .explorer
-                                    .update_hover(px, py, _ed_vp.x, _ed_vp.y, header_h, item_h);
+                            if let Some(font_sys) = &mut self.font_sys
+                                && self.editor.update_explorer_hover(px, py, &_ed_vp, font_sys)
+                            {
                                 self.request_redraw();
                             }
                             return;
-                        } else if self.editor.explorer.hovered_idx.is_some() {
-                            self.editor.explorer.hovered_idx = None;
-                            self.request_redraw();
                         }
+                    }
+                    if let Some(font_sys) = &mut self.font_sys
+                        && self.editor.update_explorer_hover(px, py, &_ed_vp, font_sys)
+                    {
+                        self.request_redraw();
                     }
                 }
 
@@ -2966,6 +3005,10 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                                 true,
                                             );
                                         }
+                                    }
+                                    StatusClickTarget::ToggleMetricsDetail => {
+                                        self.metrics.toggle_detail();
+                                        self.request_redraw();
                                     }
                                 }
                             }
@@ -3488,8 +3531,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         && px <= ed_vp.x + ed_vp.w
                         && py >= ed_vp.y
                         && py <= ed_vp.y + ed_vp.h
-                    {
-                        if let Some(font_sys) = &mut self.font_sys {
+                        && let Some(font_sys) = &mut self.font_sys {
                             let multiplier = self.config.mouse_scroll_multiplier;
                             if self
                                 .editor
@@ -3499,7 +3541,6 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             }
                             return;
                         }
-                    }
                 }
 
                 let cell_h = self
@@ -3608,6 +3649,8 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             let due = self.last_autosave + Duration::from_secs(interval);
             next = Some(next.map_or(due, |current| current.min(due)));
         }
+        let metrics_due = self.metrics.next_sample_time();
+        next = Some(next.map_or(metrics_due, |current| current.min(metrics_due)));
         if let Some(next) = next {
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
         } else {

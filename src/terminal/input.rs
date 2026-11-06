@@ -91,8 +91,8 @@ pub fn encode_key_event(event: &KeyEvent, mods: ModifiersState, mode: TermMode) 
     }
 
     // Ctrl + key control codes
-    if ctrl && !mods.super_key() {
-        if let Key::Character(s) = &event.logical_key
+    if ctrl && !mods.super_key()
+        && let Key::Character(s) = &event.logical_key
             && let Some(ch) = s.chars().next()
         {
             let lower = ch.to_ascii_lowercase();
@@ -115,7 +115,6 @@ pub fn encode_key_event(event: &KeyEvent, mods: ModifiersState, mode: TermMode) 
                 };
             }
         }
-    }
 
     // Standard UTF-8 character input (covers ASCII, XKB Burmese `mm` layout, Unicode compose!)
     if !ctrl && !mods.super_key() {

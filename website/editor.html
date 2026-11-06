@@ -108,8 +108,9 @@
           <h2>Overview</h2>
           <p>
             The editor is part of the same binary as the terminal. It reuses Ocean's OpenGL renderer, font system, theme
-            palette, and event loop, so switching between a shell and a source file is instant — no new process, no
-            second window, and no separate configuration.
+            palette, and event loop, so in-place switching between a shell and a source file is instant with no separate
+            configuration. <code>edit [PATH]</code> opens a separate editor window by default; use <code>edit --here</code>
+            to switch the current window instead.
           </p>
           <ul>
             <li><strong>Native GPU pipeline.</strong> Cells, glyphs, gutters, tabs, popups, and squiggles are drawn through Ocean's instanced <code>glow</code>/<code>glutin</code> renderer.</li>
@@ -136,10 +137,12 @@
                 <tr><th>Entry point</th><th>How</th></tr>
               </thead>
               <tbody>
-                <tr><td><code>ocean edit [PATH]</code></td><td>Open a file, or a folder as the workspace. No path opens the current directory.</td></tr>
-                <tr><td><code>edit [PATH]</code></td><td>Standalone launcher installed as an <code>ocean</code> symlink by the <code>.deb</code> and <code>.rpm</code> packages.</td></tr>
-                <tr><td><code>edit [PATH]</code> inside an Ocean shell</td><td>Switches the <strong>current window</strong> into Pure Editor mode via local IPC. No new window or tab is created.</td></tr>
+                <tr><td><code>ocean edit [PATH]</code></td><td>Open a file, or a folder as the workspace, in a <strong>separate editor window</strong>. No path opens the current directory.</td></tr>
+                <tr><td><code>edit [PATH]</code></td><td>Standalone launcher installed as an <code>ocean</code> symlink by the <code>.deb</code> and <code>.rpm</code> packages; opens a separate editor window.</td></tr>
+                <tr><td><code>edit --here [PATH]</code></td><td>Switches the <strong>current Ocean window</strong> into Pure Editor mode via local IPC instead of opening a new window.</td></tr>
+                <tr><td><code>ocean +editor-window [PATH]</code></td><td>Explicitly opens a <strong>separate editor window</strong> and leaves the terminal window untouched.</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle Pure Editor mode (Mode C) from a running session.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open the current file/workspace in a separate editor window.</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B): editor on top, terminal on the bottom.</td></tr>
                 <tr><td>Context Menu</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Toggle Code Editor</strong> (mnemonic <kbd>i</kbd>).</td></tr>
               </tbody>
@@ -225,6 +228,7 @@
               </thead>
               <tbody>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle between Pure Editor (Mode C) and terminal</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open the editor in a separate window</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B)</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Open the terminal Context Menu (includes <strong>Toggle Code Editor</strong>)</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>Reload config and theme live</td></tr>
@@ -240,10 +244,11 @@
               </thead>
               <tbody>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active document to disk</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the fuzzy file/command palette</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the Neovim-style bottom <code>:</code> command palette / fuzzy file finder</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Show / hide the file explorer sidebar</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Open workspace search and replace</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> cycle matches, <kbd>Esc</kbd> closes)</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Open Git changes and refresh status</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Neovim-style bottom <code>/</code> search line (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> cycle matches, <kbd>Esc</kbd> closes)</td></tr>
                 <tr><td><kbd>Alt</kbd>+<kbd>Click</kbd></td><td>Add a cursor; <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd> adds one above or below</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Trigger LSP autocompletion (<kbd>Up</kbd>/<kbd>Down</kbd> navigate, <kbd>Enter</kbd>/<kbd>Tab</kbd> accept, <kbd>Esc</kbd> dismiss)</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Hover documentation for the symbol under the cursor</td></tr>
@@ -325,10 +330,12 @@
             <li><strong>Document tabs</strong> are always visible, with an active accent, unsaved dirty dot, per-tab close button, and a <code>+</code> button for a new document.</li>
             <li><strong>Breadcrumbs</strong> below the tabs show the active file path relative to the workspace root.</li>
             <li><strong>Menu bar</strong> at the top of the editor (F10 or mouse) with File / Edit / View / Go / Help, recent files, quick open, find, view toggles, and split actions.</li>
-            <li><strong>Activity bar</strong> uses theme-tinted icons for <strong>Explorer</strong>, <strong>Search</strong>, <strong>Problems</strong>, and <strong>Plugins</strong>; the search icon opens the workspace search panel, while <kbd>Ctrl</kbd>+<kbd>P</kbd> remains the command palette.</li>
+            <li><strong>Activity bar</strong> uses Nerd Font glyphs for <strong>Explorer</strong>, <strong>Search</strong>, <strong>Problems</strong>, <strong>Plugins</strong>, and <strong>Git</strong>; the search icon opens the workspace search panel, while <kbd>Ctrl</kbd>+<kbd>P</kbd> remains the command palette.</li>
+            <li><strong>Nerd Font icons</strong> render UI and file-type symbols from the active patched font and tint them by theme/language. Bundled PNGs are used automatically if no Nerd Font is installed.</li>
             <li><strong>File-type icons</strong> appear on tabs, breadcrumbs, and explorer rows (Rust, TypeScript, JavaScript, Python, Go, C/C++, HTML, CSS, JSON, TOML, Markdown, Shell, Docker).</li>
             <li><strong>Plugins panel</strong> lists installed plugins with version and enabled state; click a row to enable/disable it.</li>
             <li><strong>Session restore &amp; autosave</strong> reopen documents, cursor positions, scroll offsets, and the workspace on launch. Dirty/untitled buffers are snapshotted every 15 seconds and recovered after a crash.</li>
+            <li><strong>Git panel</strong> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>) lists the current branch, modified/untracked files, and staged state; click a row to open it. Gutter markers show changed lines, and the current line displays inline blame. The command palette can open the current file's diff against <code>HEAD</code>.</li>
             <li><strong>Problems panel</strong> lists diagnostics across open documents; click an entry to open the file and jump to the line.</li>
             <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state. It renders at 80% of the terminal font size by default.</li>
             <li><strong>Unsaved-work dialog</strong> appears before closing a dirty document, closing the last tab/pane, quitting, or pressing the window close button. Choices are <strong>Save</strong> / <strong>Discard</strong> / <strong>Cancel</strong> (or <strong>Save All</strong> / <strong>Discard All</strong> / <strong>Cancel</strong>); <kbd>Esc</kbd> always cancels. <code>:q!</code> is the explicit force-discard.</li>
@@ -559,7 +566,8 @@
 <span class="tok-key">theme</span>                = <span class="tok-val">ocean-dark</span>
 <span class="tok-key">font-family</span>          = <span class="tok-val">Cascadia Code NF</span>
 <span class="tok-key">font-family-myanmar</span> = <span class="tok-val">Padauk</span>
-<span class="tok-key">font-size</span>            = <span class="tok-val">13.5</span></pre>
+<span class="tok-key">font-size</span>            = <span class="tok-val">13.5</span>
+<span class="tok-key">editor-font-scale</span>   = <span class="tok-val">0.92</span></pre>
           </div>
 
           <ul>

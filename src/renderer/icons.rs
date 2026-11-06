@@ -1,6 +1,8 @@
 use std::path::Path;
 
+use crate::config::theme::ThemePalette;
 use crate::editor::syntax::Language;
+use crate::font::{FontStyle, FontSystem};
 use crate::renderer::QuadInstance;
 use crate::renderer::atlas::GlyphAtlas;
 
@@ -267,6 +269,51 @@ impl IconId {
             .find(|(id, _, _)| *id == self)
             .map(|(_, one, two)| if px >= 32 { *two } else { *one })
     }
+
+    /// Nerd Font private-use codepoint for this icon. The bundled PNGs remain
+    /// as a fallback when no patched Nerd Font is available.
+    pub fn nerd_char(self) -> char {
+        match self {
+            Self::Explorer => '\u{f0c5}',
+            Self::Search => '\u{f002}',
+            Self::Problems => '\u{f188}',
+            Self::Plugins => '\u{f1e6}',
+            Self::ChevronRight => '\u{f054}',
+            Self::ChevronDown => '\u{f078}',
+            Self::Close => '\u{f00d}',
+            Self::Plus => '\u{f067}',
+            Self::Dirty => '\u{f111}',
+            Self::File => '\u{f15b}',
+            Self::Folder => '\u{f07b}',
+            Self::FolderOpen => '\u{f07c}',
+            Self::Save => '\u{f0c7}',
+            Self::Refresh => '\u{f021}',
+            Self::Settings => '\u{f013}',
+            Self::Error => '\u{f057}',
+            Self::Warning => '\u{f071}',
+            Self::Info => '\u{f05a}',
+            Self::Git => '\u{f1d3}',
+            Self::Outline => '\u{f03a}',
+            Self::Terminal => '\u{f120}',
+            Self::Split => '\u{f0db}',
+            Self::Check => '\u{f00c}',
+            Self::FileRust => '\u{e7a8}',
+            Self::FileTypescript => '\u{e628}',
+            Self::FileJavascript => '\u{e781}',
+            Self::FilePython => '\u{e73c}',
+            Self::FileGo => '\u{e627}',
+            Self::FileC => '\u{e61e}',
+            Self::FileCpp => '\u{e61d}',
+            Self::FileHtml => '\u{e736}',
+            Self::FileCss => '\u{e749}',
+            Self::FileJson => '\u{e60b}',
+            Self::FileToml => '\u{e6b2}',
+            Self::FileMarkdown => '\u{e609}',
+            Self::FileShell => '\u{f489}',
+            Self::FileDocker => '\u{e7b0}',
+            Self::FilePlain => '\u{f15b}',
+        }
+    }
 }
 
 pub fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -331,7 +378,29 @@ pub fn file_icon_for_name(name: &str) -> IconId {
     file_icon_for(Path::new(name), false, false)
 }
 
+/// VSCode-like tint for file-type glyphs rendered from Nerd Fonts.
+pub fn icon_color(icon: IconId, theme: &ThemePalette, alpha: f32) -> [f32; 4] {
+    let color = match icon {
+        IconId::FileRust | IconId::FileJavascript | IconId::FileJson | IconId::FileToml => {
+            theme.ansi[3]
+        }
+        IconId::FileTypescript
+        | IconId::FileC
+        | IconId::FileCpp
+        | IconId::FileCss
+        | IconId::FileMarkdown
+        | IconId::FileDocker => theme.ansi[4],
+        IconId::FilePython | IconId::FileGo => theme.ansi[6],
+        IconId::FileHtml => theme.ansi[1],
+        IconId::FileShell => theme.ansi[2],
+        _ => theme.foreground,
+    };
+    color.to_f32_rgba(alpha)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn emit(
+    font_sys: &mut FontSystem,
     atlas: &mut GlyphAtlas,
     target: &mut Vec<QuadInstance>,
     icon: IconId,
@@ -343,6 +412,31 @@ pub fn emit(
     if size <= 0.0 {
         return false;
     }
+
+    let ch = icon.nerd_char();
+    let font_id = font_sys.resolve_font_for_char(ch, FontStyle::Regular);
+    let glyph_id = font_sys.font(font_id).glyph_id(ch);
+    if glyph_id != 0 {
+        let font_px = (size * 1.18).max(8.0);
+        let entry = atlas.get_or_rasterize(font_sys, font_id, glyph_id, font_px, false);
+        if entry.width > 0 && entry.height > 0 {
+            let w = entry.width as f32;
+            let h = entry.height as f32;
+            target.push(QuadInstance {
+                pos: [
+                    (x + (size - w) * 0.5).round(),
+                    (y + (size - h) * 0.5).round(),
+                ],
+                size: [w, h],
+                uv_pos: [entry.uv_x, entry.uv_y],
+                uv_size: [entry.uv_w, entry.uv_h],
+                color,
+                kind: 1.0,
+            });
+            return true;
+        }
+    }
+
     let bucket = if size >= 24.0 { 32 } else { 16 };
     let entry = atlas.get_or_insert_icon(icon, bucket);
     if entry.width == 0 || entry.height == 0 {
@@ -372,6 +466,21 @@ mod tests {
         let (w, h, rgba) = decode_png(IconId::Explorer.bytes(16).unwrap()).expect("decode");
         assert_eq!((w, h), (16, 16));
         assert_eq!(rgba.len(), 16 * 16 * 4);
+    }
+
+    #[test]
+    fn rasterizes_nerd_font_glyphs_when_available() {
+        let config = crate::config::Config::default();
+        let mut font_sys = crate::font::FontSystem::new(&config, 1.0);
+        let mut atlas = GlyphAtlas::new(512);
+        let ch = IconId::FileRust.nerd_char();
+        let font_id = font_sys.resolve_font_for_char(ch, FontStyle::Regular);
+        let glyph_id = font_sys.font(font_id).glyph_id(ch);
+        if glyph_id == 0 {
+            return;
+        }
+        let entry = atlas.get_or_rasterize(&font_sys, font_id, glyph_id, 16.0, false);
+        assert!(entry.width > 0 && entry.height > 0);
     }
 
     #[test]

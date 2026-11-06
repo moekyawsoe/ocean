@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod document;
 pub mod explorer;
+pub mod git;
 pub mod lsp;
 pub mod myanmar;
 pub mod overlay;
@@ -19,6 +20,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use crate::config::Config;
 use crate::editor::document::{EditorDocument, SelectionKind};
 pub use crate::editor::explorer::{ExplorerEntry, FileExplorer};
+use crate::editor::git::GitStatus;
 use crate::editor::lsp::{LspClient, LspEvent};
 use crate::editor::overlay::{
     CommandPalette, CompletionOverlay, FindBar, HoverOverlay, PaletteAction,
@@ -48,6 +50,7 @@ pub enum SidebarPanel {
     Search,
     Problems,
     Plugins,
+    Git,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,8 @@ pub struct EditorWorkspace {
     pub menu_height: f32,
     pub recent_files: Vec<PathBuf>,
     pub search: WorkspaceSearch,
+    pub git: GitStatus,
+    pub metrics_label: Option<String>,
     pending_replace_all: Option<usize>,
 }
 
@@ -162,6 +167,8 @@ impl EditorWorkspace {
             menu_height: 0.0,
             recent_files: Vec::new(),
             search: WorkspaceSearch::default(),
+            git: GitStatus::default(),
+            metrics_label: None,
             pending_replace_all: None,
         }
     }
@@ -301,6 +308,7 @@ impl EditorWorkspace {
         self.search.results.clear();
         self.run_search();
         self.search.message = Some(format!("Replaced {replaced} occurrence(s)"));
+        self.refresh_git();
     }
 
     fn handle_search_key(&mut self, event: &KeyEvent, modifiers: ModifiersState) {
@@ -387,6 +395,7 @@ impl EditorWorkspace {
                 if let Some(path) = path {
                     self.lsp.did_save(&path);
                 }
+                self.refresh_git();
                 Ok(())
             }
             Err(err) => Err(format!("Could not save {name}: {err}")),
@@ -413,6 +422,7 @@ impl EditorWorkspace {
         for path in saved_paths {
             self.lsp.did_save(&path);
         }
+        self.refresh_git();
         Ok(())
     }
 
@@ -439,6 +449,60 @@ impl EditorWorkspace {
             w: vp.w,
             h: (vp.h - self.menu_height).max(10.0),
         }
+    }
+
+    pub fn sidebar_rect(&self, vp: &EditorViewport) -> Option<(f32, f32, f32, f32)> {
+        let body = self.body_viewport(vp);
+        let panel_open = self.explorer.visible
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
+        if !panel_open {
+            return None;
+        }
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
+        let width = match self.active_panel {
+            SidebarPanel::Search => self
+                .explorer
+                .width
+                .max(280.0)
+                .min((body.w - 160.0).max(80.0)),
+            SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => self
+                .explorer
+                .width
+                .max(240.0)
+                .min((body.w - 160.0).max(80.0)),
+            SidebarPanel::Explorer => self.explorer.width.min(body.w - 100.0).max(80.0),
+        };
+        Some((body.x + activity_w, body.y, width, body.h))
+    }
+
+    pub fn update_explorer_hover(
+        &mut self,
+        px: f32,
+        py: f32,
+        vp: &EditorViewport,
+        font_sys: &mut FontSystem,
+    ) -> bool {
+        let previous = self.explorer.hovered_idx;
+        let body = self.body_viewport(vp);
+        if self.active_panel == SidebarPanel::Explorer
+            && let Some((sx, sy, sw, sh)) = self.sidebar_rect(vp)
+            && px >= sx
+            && px < sx + sw
+            && py >= sy
+            && py <= sy + sh
+        {
+            let header_h = (font_sys.metrics.cell_height + 6.0).round();
+            let item_h = (font_sys.metrics.cell_height + 3.0).round();
+            self.explorer
+                .update_hover(px, py, sx, body.y, header_h, item_h);
+        } else {
+            self.explorer.hovered_idx = None;
+        }
+        self.explorer.hovered_idx != previous
     }
 
     pub fn is_active(&self) -> bool {
@@ -477,6 +541,66 @@ impl EditorWorkspace {
         let p = path.as_ref();
         self.workspace_dir = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
         self.explorer.open_folder(p);
+        self.refresh_git();
+    }
+
+    pub fn refresh_git(&mut self) {
+        if self.workspace_dir.as_os_str().is_empty() {
+            self.git = GitStatus::default();
+            return;
+        }
+        if let Some(last) = self.git.last_refresh
+            && last.elapsed() < std::time::Duration::from_millis(600)
+        {
+            return;
+        }
+        self.git.refresh(&self.workspace_dir);
+        if let Some(path) = self.active_doc_ref().path().cloned() {
+            self.git.refresh_file(&self.workspace_dir, &path);
+            self.git.refresh_blame(&self.workspace_dir, &path);
+        }
+    }
+
+    pub fn refresh_active_git_file(&mut self) {
+        if !self.git.is_repo {
+            self.refresh_git();
+            return;
+        }
+        if let Some(path) = self.active_doc_ref().path().cloned() {
+            self.git.refresh_file(&self.workspace_dir, &path);
+            self.git.refresh_blame(&self.workspace_dir, &path);
+        }
+    }
+
+    pub fn show_git_diff(&mut self) {
+        let Some(path) = self.active_doc_ref().path().cloned() else {
+            self.git.error = Some("Open a tracked file to view its diff".to_string());
+            self.active_panel = SidebarPanel::Git;
+            self.explorer.visible = true;
+            return;
+        };
+        if self.workspace_dir.as_os_str().is_empty() {
+            return;
+        }
+        self.git.refresh(&self.workspace_dir);
+        self.git.refresh_file(&self.workspace_dir, &path);
+        let Some(diff) = self.git.diff_text(&self.workspace_dir, &path) else {
+            self.git.error = Some(format!("No changes for {}", path.display()));
+            self.active_panel = SidebarPanel::Git;
+            self.explorer.visible = true;
+            return;
+        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file");
+        let mut document = EditorDocument::from_text(&diff, None, false);
+        document.display_name = Some(format!("diff: {name}"));
+        self.documents.push(document);
+        self.active_doc_idx = self.documents.len() - 1;
+        self.mode = WorkspaceMode::PureEditor;
+        self.editor_focused = true;
+        self.vim.reset_to_normal();
     }
 
     pub fn open_command_palette(&mut self, workspace_dir: &Path) {
@@ -512,6 +636,7 @@ impl EditorWorkspace {
         {
             self.workspace_dir = parent.to_path_buf();
             self.explorer.open_folder(parent);
+            self.git.refresh(&self.workspace_dir);
         }
 
         // Check if already open
@@ -525,6 +650,7 @@ impl EditorWorkspace {
             self.vim.reset_to_normal();
             self.completion = None;
             self.hover = None;
+            self.refresh_active_git_file();
             return Ok(());
         }
 
@@ -557,6 +683,7 @@ impl EditorWorkspace {
                 self.hover = None;
                 self.completion_request = None;
                 self.hover_request = None;
+                self.refresh_active_git_file();
                 Ok(())
             }
             Err(e) => Err(format!("Failed opening {}: {e}", p.display())),
@@ -1027,6 +1154,17 @@ impl EditorWorkspace {
             return true;
         }
 
+        // Ctrl+Shift+G: Git Changes
+        if ctrl
+            && shift
+            && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("g"))
+        {
+            self.active_panel = SidebarPanel::Git;
+            self.explorer.visible = true;
+            self.refresh_git();
+            return true;
+        }
+
         // Ctrl+Shift+F: Workspace Search
         if ctrl
             && shift
@@ -1309,6 +1447,15 @@ impl EditorWorkspace {
                             self.explorer.visible = true;
                         }
                     }
+                    4 => {
+                        if self.active_panel == SidebarPanel::Git && self.explorer.visible {
+                            self.explorer.visible = false;
+                        } else {
+                            self.active_panel = SidebarPanel::Git;
+                            self.explorer.visible = true;
+                            self.refresh_git();
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1322,7 +1469,7 @@ impl EditorWorkspace {
                 SidebarPanel::Search => {
                     self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
                 }
-                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => {
                     self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
                 }
                 SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
@@ -1418,6 +1565,29 @@ impl EditorWorkspace {
                         {
                             let _ = crate::plugins::set_enabled(&info.id, !info.enabled);
                             self.plugins.reload_plugins();
+                        }
+                    }
+                    SidebarPanel::Git => {
+                        let header_h = (line_h + 6.0).round();
+                        let item_h = (line_h + 3.0).round();
+                        if py >= vp.y && py < vp.y + header_h {
+                            self.refresh_git();
+                            return true;
+                        }
+                        let content_y = vp.y
+                            + header_h
+                            + if self.git.branch.is_some() {
+                                item_h
+                            } else {
+                                0.0
+                            };
+                        let row = ((py - content_y) / item_h).floor();
+                        if row >= 0.0
+                            && let Some(change) = self.git.changes.get(row as usize).cloned()
+                        {
+                            let _ = self.open_file(&change.path, proxy);
+                            self.refresh_active_git_file();
+                            self.editor_focused = true;
                         }
                     }
                 }
@@ -1570,7 +1740,7 @@ impl EditorWorkspace {
                 SidebarPanel::Search => {
                     self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
                 }
-                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => {
                     self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
                 }
                 SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
@@ -1636,7 +1806,7 @@ impl EditorWorkspace {
                 SidebarPanel::Search => {
                     self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
                 }
-                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => {
                     self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
                 }
                 SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
@@ -1697,7 +1867,7 @@ impl EditorWorkspace {
                 SidebarPanel::Search => {
                     self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
                 }
-                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => {
                     self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
                 }
                 SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
@@ -1753,7 +1923,7 @@ impl EditorWorkspace {
                 SidebarPanel::Search => {
                     self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
                 }
-                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                SidebarPanel::Problems | SidebarPanel::Plugins | SidebarPanel::Git => {
                     self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
                 }
                 SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
@@ -1940,6 +2110,13 @@ impl EditorWorkspace {
         };
 
         if let Some(&(start_char, end_char)) = target_match {
+            let match_index = matches
+                .iter()
+                .position(|(start, _)| *start == start_char)
+                .map(|index| index + 1)
+                .unwrap_or(1);
+            self.find_bar.current_match = match_index;
+
             let (line, col) = self.active_doc().buffer.char_to_line_col(start_char);
             let shaped = self.active_doc().shaped_line(line, font_sys);
             let cluster = shaped.char_to_cluster(col);
@@ -1948,9 +2125,11 @@ impl EditorWorkspace {
             let end_shaped = self.active_doc().shaped_line(end_line, font_sys);
             let end_cluster = end_shaped.char_to_cluster(end_col);
 
-            self.active_doc().selection_anchor =
-                Some(crate::editor::document::Cursor::new(line, cluster));
-            self.active_doc().cursor = crate::editor::document::Cursor::new(end_line, end_cluster);
+            let doc = self.active_doc();
+            doc.selection_anchor = Some(crate::editor::document::Cursor::new(line, cluster));
+            doc.cursor = crate::editor::document::Cursor::new(end_line, end_cluster);
+            doc.cursor.preferred_visual_x = None;
+            doc.scroll_to_cursor_requested = true;
         }
     }
 
@@ -2005,6 +2184,31 @@ impl EditorWorkspace {
             }
             PaletteAction::ToggleFileExplorer => {
                 self.explorer.toggle_visible();
+            }
+            PaletteAction::OpenEditorWindow => {
+                if let Ok(exe) = std::env::current_exe() {
+                    let mut cmd = std::process::Command::new(exe);
+                    cmd.arg("--editor-window");
+                    let path = self.active_doc_ref().path().cloned().or_else(|| {
+                        (!self.workspace_dir.as_os_str().is_empty())
+                            .then(|| self.workspace_dir.clone())
+                    });
+                    if let Some(path) = path {
+                        cmd.arg(path);
+                    }
+                    let _ = cmd.spawn();
+                }
+            }
+            PaletteAction::ShowGitChanges => {
+                self.active_panel = SidebarPanel::Git;
+                self.explorer.visible = true;
+                self.refresh_git();
+            }
+            PaletteAction::ShowGitDiff => {
+                self.show_git_diff();
+            }
+            PaletteAction::GitRefresh => {
+                self.refresh_git();
             }
         }
     }
@@ -2126,12 +2330,14 @@ impl EditorWorkspace {
             &problems,
             &plugin_infos,
             &self.search,
+            &self.git,
             self.active_panel,
             self.activity_bar_visible,
             vim_view,
             ime_preedit,
             ui_scale,
             self.menu_height,
+            self.metrics_label.as_deref(),
         );
     }
 }
@@ -2801,6 +3007,70 @@ mod tests {
         let drag_res = ws.handle_scrollbar_drag(300.0, &vp, 0.0, &mut font_sys);
         assert!(drag_res);
         assert!(ws.active_doc().scroll_y > 10);
+    }
+
+    #[test]
+    fn find_next_match_requests_auto_scroll() {
+        let config = Config::default();
+        let mut font_sys = FontSystem::new(&config, 1.0);
+        let text = (0..60)
+            .map(|line| {
+                if line == 42 {
+                    "needle here".to_string()
+                } else {
+                    format!("line {line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut ws = EditorWorkspace::new();
+        ws.documents[0] = EditorDocument::from_text(&text, None, false);
+        ws.documents[0].scroll_to_cursor_requested = false;
+        ws.find_bar.query = "needle".to_string();
+        ws.update_find_matches();
+
+        ws.jump_to_next_match(&mut font_sys, false);
+
+        assert_eq!(ws.active_doc_ref().cursor.line, 42);
+        assert!(ws.active_doc_ref().scroll_to_cursor_requested);
+        assert_eq!(ws.find_bar.current_match, 1);
+    }
+
+    #[test]
+    fn explorer_hover_uses_activity_bar_and_menu_offsets() {
+        let mut ws = EditorWorkspace::new();
+        ws.menu_height = 10.0;
+        ws.explorer.visible = true;
+        ws.explorer.root_name = "workspace".to_string();
+        ws.explorer.width = 210.0;
+        ws.explorer.entries = (0..3)
+            .map(|i| ExplorerEntry {
+                path: PathBuf::from(format!("file{i}.rs")),
+                name: format!("file{i}.rs"),
+                is_dir: false,
+                depth: 0,
+                is_expanded: false,
+            })
+            .collect();
+
+        let vp = EditorViewport {
+            x: 0.0,
+            y: 20.0,
+            w: 800.0,
+            h: 500.0,
+        };
+        let (sx, sy, sw, _) = ws.sidebar_rect(&vp).expect("explorer sidebar rect");
+        assert_eq!((sx, sy, sw), (44.0, 30.0, 210.0));
+
+        let config = Config::default();
+        let mut font_sys = FontSystem::new(&config, 1.0);
+        let header_h = (font_sys.metrics.cell_height + 6.0).round();
+        let item_h = (font_sys.metrics.cell_height + 3.0).round();
+        ws.update_explorer_hover(sx + 12.0, sy + header_h + item_h * 1.5, &vp, &mut font_sys);
+        assert_eq!(ws.explorer.hovered_idx, Some(1));
+
+        ws.update_explorer_hover(sx + 12.0, sy + 2.0, &vp, &mut font_sys);
+        assert_eq!(ws.explorer.hovered_idx, None);
     }
 
     #[test]

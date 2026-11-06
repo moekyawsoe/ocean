@@ -69,6 +69,7 @@ pub enum Action {
     PreviousTab,
     GotoTab(usize),
     NewWindow,
+    OpenEditorWindow,
     ToggleFullscreen,
     ToggleWindowDecorations,
     ToggleStatusBar,
@@ -142,6 +143,7 @@ pub fn default_keybinds() -> Vec<Keybind> {
         "ctrl+page_up=previous_tab",
         "ctrl+shift+tab=previous_tab",
         "ctrl+shift+n=new_window",
+        "ctrl+shift+o=open_editor_window",
         "f11=toggle_fullscreen",
         "ctrl+shift+b=toggle_status_bar",
         "context_menu=toggle_context_menu",
@@ -356,6 +358,9 @@ fn parse_action(rhs: &str) -> Option<Action> {
             Some(Action::GotoTab(idx.saturating_sub(1)))
         }
         "new_window" => Some(Action::NewWindow),
+        "open_editor_window" | "editor_window" | "new_editor_window" => {
+            Some(Action::OpenEditorWindow)
+        }
         "toggle_fullscreen" => Some(Action::ToggleFullscreen),
         "toggle_window_decorations" | "toggle_titlebar" | "toggle_title_bar" => {
             Some(Action::ToggleWindowDecorations)

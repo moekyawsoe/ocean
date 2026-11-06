@@ -63,10 +63,10 @@ cargo build --release
 
 - **Built-in GPU-Accelerated IDE & Code Editor (`edit [path]` or `ocean edit [path]`)**:
   - **Invocable Everywhere**: Launch directly via standalone `edit [path]`, `ocean edit [path]`, right-click context menu, or keyboard shortcuts (`Ctrl+Shift+I` toggles Pure Editor mode; `Ctrl+\` toggles Split Mode with Editor on top and Terminal on bottom). Typing `edit` (or `ocean edit`) with no arguments automatically opens the current path folder.
-  - **Switches the current window, not a new one**: Running `edit [path]` inside an Ocean shell sends a local IPC request to the owning window and switches that pane's window into editor mode. When invoked from outside Ocean, it reuses the most recently active Ocean window if one is running; otherwise it opens a normal editor window.
+  - **Separate editor window by default**: `edit [path]`, `ocean edit [path]`, `ocean +editor-window [path]`, `Ctrl+Shift+O`, and File → **Open Editor in New Window** all keep the terminal window untouched and open the editor in its own window. Use `edit --here [path]` (or `--in-place`) when you want the old behavior of switching the current Ocean window into editor mode; `Ctrl+Shift+I` still toggles in place.
   - **Unsaved-work protection**: Closing a dirty document, closing the last tab/pane, quitting the app, or pressing the window close button opens a Save / Discard / Cancel confirmation dialog. `:q`, `:wq`, `Ctrl+W`, tab close buttons, and the palette all share the same protection. `:q!` and explicit Discard remain the only ways to drop work.
   - **Compact status bar**: The bottom Neovim-style status bar renders at 80% of the terminal font size by default, keeping shortcut chips readable without dominating the window.
-  - **Theme-aware icon system**: Embedded 1×/2× PNG icons are packed into the existing GPU glyph atlas, so activity-bar, file-type, tab, chevron, severity, and toolbar icons stay crisp and tinted by the active theme without adding a second draw call.
+  - **Nerd Font icon system**: UI and file-type icons render from Nerd Font private-use glyphs, tinted by the active theme and language. Bundled 1×/2× PNG icons remain as an automatic fallback when no patched Nerd Font is installed.
   - **Top menu bar & recent files**: `File / Edit / View / Go / Help` menus (F10 or mouse) with recent files, quick open, find, view toggles, and editor/terminal split actions.
   - **Plugin manager**: Plugin manifests and registry, local/URL installation with SHA-256 verification, enable/disable, uninstall, update, checksum verification, and a Plugins sidebar panel. CLI: `ocean +plugin-list`, `+plugin-install`, `+plugin-remove`, `+plugin-enable`, `+plugin-disable`, `+plugin-info`, `+plugin-verify`, `+plugin-update`.
   - **Session restore & crash recovery**: Open documents, cursor/scroll positions, editor mode, and workspace are restored on launch. Dirty/untitled buffers are snapshotted every 15 seconds to `$XDG_STATE_HOME/ocean/backups/` and recovered after a crash; clean exits clear the backups.
@@ -76,6 +76,7 @@ cargo build --release
   - **High-Performance Buffer**: Powered by `ropey` (B-tree Rope) for O(log N) edits on multi-megabyte files, with full undo/redo transaction stack and position restoration.
   - **Modeless Ergonomics**: Standard developer shortcuts: `Ctrl+S` (Save), `Ctrl+P` (Fuzzy file/command palette powered by `nucleo-matcher`), `Ctrl+F` (Find bar with match navigation), `Ctrl+Z` (Undo), `Ctrl+Y` / `Ctrl+Shift+Z` (Redo), `Ctrl+C` (Copy), `Ctrl+V` (Paste), `Ctrl+X` (Cut), `Ctrl+W` (Close document), and mouse click/drag text selection.
   - **Syntax Highlighting**: Lexical and Tree-sitter tokenizers mapping semantic syntax tokens to Ocean's active color themes across Rust, Python, TypeScript, JavaScript, Go, C/C++, JSON, TOML, Markdown, and Shell.
+  - **Git integration**: `Ctrl+Shift+G` opens the Source Control panel with branch/status, changed and untracked files, and click-to-open. Modified lines get colored gutter markers, the current line shows inline GitLens-style blame, and the command palette can open the current file's diff against `HEAD`.
   - **Embedded Multi-Server LSP Client**: Asynchronous JSON-RPC clients for Rust (`rust-analyzer`), Go (`gopls`), TypeScript/JavaScript (`vtsls` or `typescript-language-server`), Python (`pylsp`/`pyright`), C/C++ (`clangd`), HTML/CSS/SCSS (`vscode-html-language-server` / `vscode-css-language-server`), JSON, YAML, TOML (`taplo`), Shell (`bash-language-server`), and Markdown (`marksman`). Each language gets its own server process, project root, diagnostics, completion popup (`Ctrl+Space`), and hover documentation (`Ctrl+K`).
   - **Sandboxed WASM Plugin Engine**: Embeds `extism` to run sandboxed WebAssembly plugins (`wasm32-wasip1`) loaded from `~/.config/ocean/plugins/`, exposing buffer manipulation, custom command registration, and status bar extensions.
 - **Ultra-Lightweight & Fast**: Single-draw-call OpenGL 3.3 / GLES 3.0 instanced GPU renderer (`glutin` + `glow`), shelf-packed `swash` glyph & color emoji atlas, O(1) `FxHashMap` shaped-run memoization, coalesced epoll PTY reader, and **0% idle CPU** (`ControlFlow::Wait`).
@@ -130,8 +131,11 @@ See [`config.example`](./config.example) for all available options:
 # Typography
 font-family = Cascadia Code NF
 font-family-myanmar = Padauk
+# Use a patched Nerd Font (Cascadia Code NF, CaskaydiaMono Nerd Font, JetBrainsMono Nerd Font, …)
+# for UI/file icons. Ocean falls back to bundled PNG icons when no Nerd Font is available.
 font-size = 13.5
-myanmar-font-scale = 0.96
+editor-font-scale = 0.92
+myanmar-font-scale = 1.12
 myanmar-zawgyi = off
 
 # Theme & Appearance (10 curated themes: ocean-dark, tokyo-night, catppuccin-mocha, nord, ocean-light, etc.)
@@ -160,6 +164,7 @@ keybind = ctrl+shift+w=close_surface
 keybind = ctrl+shift+comma=reload_config
 keybind = ctrl+shift+m=toggle_myanmar_zawgyi
 keybind = ctrl+shift+i=toggle_editor
+keybind = ctrl+shift+o=open_editor_window
 keybind = ctrl+backslash=toggle_split_mode
 ```
 
@@ -184,9 +189,10 @@ keybind = ctrl+backslash=toggle_split_mode
 | `Ctrl+Alt+H/J/K/L` or `Ctrl+Alt+Arrows` | Resize active split pane |
 | `Alt+Shift+=` | Equalize split pane sizes |
 | `Right Click` | Context menu at pointer (also clickable via bottom bar pills) |
-| `Ctrl+Shift+?` | Toggle in-app Help & Documentation dialog (`1`–`5` / `h`/`l` sections, `j`/`k`/`g`/`G` scroll) |
+| `Ctrl+Shift+?` | Open the near-full-screen Help & Documentation dialog with a shortcut table and version (`1`–`5` / `h`/`l` sections, `j`/`k`/`g`/`G` scroll) |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Shift+N` | Open new window |
+| `Ctrl+Shift+O` | Open the code editor in a separate window |
 | `Ctrl+Shift+,` or `Ctrl+Shift+R` | Live reload configuration |
 | `Ctrl+Shift+M` | Toggle legacy Zawgyi-One auto-conversion |
 | `Shift+PageUp` / `Shift+PageDown` | Scroll history page up / down |
@@ -199,9 +205,10 @@ keybind = ctrl+backslash=toggle_split_mode
 |---|---|
 | `Ctrl+B` | Toggle File Explorer Sidebar (show / hide project folder tree) |
 | `Ctrl+S` | Save current document buffer to disk |
-| `Ctrl+P` | Open Command Palette / Fuzzy File Finder (powered by `nucleo-matcher`) |
+| `Ctrl+P` | Open the Neovim-style bottom `:` command palette / fuzzy file finder |
 | `Ctrl+Shift+F` | Open the workspace Search panel (results respect `.gitignore`) |
-| `Ctrl+F` | Open in-buffer Find Bar (`Enter` / `Shift+Enter` cycles matches, `Esc` dismisses) |
+| `Ctrl+Shift+G` | Open Git Source Control changes and refresh status |
+| `Ctrl+F` | Open the Neovim-style bottom `/` search line (`Enter` / `Shift+Enter` cycles matches, `Esc` dismisses) |
 | `Ctrl+Space` | Trigger asynchronous LSP autocompletion popup (`Up`/`Down` navigates, `Enter`/`Tab` completes) |
 | `Ctrl+K` | Show hover documentation popup for symbol under cursor |
 | `Ctrl+Z` | Undo last edit transaction with cursor restoration |

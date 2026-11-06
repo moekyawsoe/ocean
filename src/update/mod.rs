@@ -61,8 +61,7 @@ pub fn running_version() -> String {
     if let Ok(output) = Command::new("dpkg-query")
         .args(["-W", "-f=${Version}", "ocean"])
         .output()
-    {
-        if output.status.success() {
+        && output.status.success() {
             let pkg_raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !pkg_raw.is_empty() {
                 let clean = pkg_raw
@@ -81,20 +80,17 @@ pub fn running_version() -> String {
                 }
             }
         }
-    }
 
     // Check Fedora / RHEL / openSUSE rpm database
     if let Ok(output) = Command::new("rpm")
         .args(["-q", "--qf", "%{VERSION}", "ocean"])
         .output()
-    {
-        if output.status.success() {
+        && output.status.success() {
             let pkg_ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !pkg_ver.is_empty() && is_newer_version(&best_ver, &pkg_ver) {
                 best_ver = pkg_ver;
             }
         }
-    }
 
     best_ver
 }
@@ -104,7 +100,7 @@ pub fn running_version() -> String {
 /// Returns true only if candidate is strictly greater than current.
 pub fn is_newer_version(current: &str, candidate: &str) -> bool {
     let parse_nums = |s: &str| -> Vec<u64> {
-        let clean = s.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+        let clean = s.trim().trim_start_matches(['v', 'V']);
         let semver_part = clean
             .split('+')
             .next()
@@ -159,7 +155,7 @@ pub fn parse_release_json(
         .trim();
 
     let clean_version = tag_name
-        .trim_start_matches(|c| c == 'v' || c == 'V')
+        .trim_start_matches(['v', 'V'])
         .to_string();
 
     if !is_newer_version(current_version, &clean_version) {
@@ -256,7 +252,7 @@ pub fn get_cached_update(current_version: &str) -> Option<(u64, Option<UpdateInf
 
     let timestamp = val["timestamp"].as_u64()?;
     let tag = val["tag_name"].as_str().unwrap_or("");
-    let clean_ver = tag.trim_start_matches(|c| c == 'v' || c == 'V');
+    let clean_ver = tag.trim_start_matches(['v', 'V']);
 
     if is_newer_version(current_version, clean_ver) {
         Some((
@@ -482,8 +478,8 @@ pub fn start_background_update_check(
     }
 
     // 1. Check local cache first (avoids hitting GitHub rate limits on frequent launches)
-    if mode == UpdateCheckMode::Daily {
-        if let Some((ts, cached)) = get_cached_update(&current_version) {
+    if mode == UpdateCheckMode::Daily
+        && let Some((ts, cached)) = get_cached_update(&current_version) {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -497,7 +493,6 @@ pub fn start_background_update_check(
                 return;
             }
         }
-    }
 
     // 2. Spawn lightweight background thread to query GitHub Releases API asynchronously
     std::thread::spawn(move || {

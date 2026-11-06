@@ -54,6 +54,7 @@ pub struct EditorDocument {
     pub scroll_x: f32,
     pub language: Language,
     pub syntax: SyntaxHighlighter,
+    pub display_name: Option<String>,
     pub scroll_to_cursor_requested: bool,
     line_cache: HashMap<usize, (u64, CachedLine)>,
 }
@@ -77,6 +78,7 @@ impl EditorDocument {
             scroll_x: 0.0,
             language: lang,
             syntax: SyntaxHighlighter::new(lang),
+            display_name: None,
             scroll_to_cursor_requested: true,
             line_cache: HashMap::new(),
         }
@@ -95,6 +97,7 @@ impl EditorDocument {
             scroll_x: 0.0,
             language: lang,
             syntax: SyntaxHighlighter::new(lang),
+            display_name: None,
             scroll_to_cursor_requested: true,
             line_cache: HashMap::new(),
         })
@@ -118,13 +121,16 @@ impl EditorDocument {
             scroll_x: 0.0,
             language,
             syntax: SyntaxHighlighter::new(language),
+            display_name: None,
             scroll_to_cursor_requested: true,
             line_cache: HashMap::new(),
         }
     }
 
     pub fn file_name(&self) -> String {
-        self.buffer.file_name()
+        self.display_name
+            .clone()
+            .unwrap_or_else(|| self.buffer.file_name())
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -1064,6 +1070,7 @@ impl EditorDocument {
         self.cursor.preferred_visual_x = None;
         self.selection_anchor = None;
         self.move_first_non_blank(false, font_sys);
+        self.scroll_to_cursor_requested = true;
     }
 
     pub fn move_word_forward(&mut self, count: usize, select: bool, font_sys: &mut FontSystem) {

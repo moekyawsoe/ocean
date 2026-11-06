@@ -27,6 +27,11 @@ pub enum StyledLine {
         first: bool,
         text: String,
     },
+    TableHeader {
+        key_cols: usize,
+        left: &'static str,
+        right: &'static str,
+    },
     KeyRow {
         key: String,
         val: String,
@@ -99,6 +104,7 @@ pub struct HelpDialog {
     pub hovered_tab: Option<usize>,
     pub close_hovered: bool,
     pub edit_hovered: bool,
+    pub version: String,
 }
 
 impl Default for HelpDialog {
@@ -110,11 +116,12 @@ impl Default for HelpDialog {
 impl HelpDialog {
     pub fn new() -> Self {
         Self {
-            active_tab: 0,
+            active_tab: 2,
             scroll_line: 0,
             hovered_tab: None,
             close_hovered: false,
             edit_hovered: false,
+            version: format!("v{}", env!("CARGO_PKG_VERSION")),
         }
     }
 
@@ -135,9 +142,7 @@ impl HelpDialog {
         let pad_x = (18.0 * sf).round();
         let right_gutter = (22.0 * sf).round();
 
-        let target_w = (cw * 78.0 + pad_x + right_gutter).round();
-        let max_w = (win_w as f32 - margin * 2.0).max(220.0);
-        let w = target_w.min(max_w).round();
+        let w = (win_w as f32 - margin * 2.0).max(220.0).round();
 
         let header_h = (ch + 16.0 * sf).round();
         let tabs_h = (ch + 12.0 * sf).round();
@@ -150,9 +155,7 @@ impl HelpDialog {
             win_h as f32
         };
 
-        let target_h = (header_h + tabs_h + footer_h + line_h * 19.0 + 16.0 * sf).round();
-        let max_h = (usable_h - margin * 2.0).max(180.0);
-        let h = target_h.min(max_h).round();
+        let h = (usable_h - margin * 2.0).max(180.0).round();
 
         let x = ((win_w as f32 - w) * 0.5).floor().max(4.0);
         let y = ((usable_h - h) * 0.5).floor().max(4.0);
@@ -241,6 +244,7 @@ impl HelpDialog {
         let cols = max_cols.max(20);
         let items = section_content(self.active_tab);
         let mut out = Vec::with_capacity(items.len() * 2);
+        let mut table_open = false;
 
         for item in items {
             match item {
@@ -264,8 +268,21 @@ impl HelpDialog {
                     }
                 }
                 RawDocItem::KeyValue(key, desc) => {
-                    let key_cols = 26usize;
-                    if cols >= 50 && display_cols(key) + 2 <= key_cols {
+                    let key_cols = 34usize;
+                    if cols >= 60 && display_cols(key) + 2 <= key_cols {
+                        if !table_open {
+                            let (left, right) = if self.active_tab == 2 {
+                                ("Shortcut", "Action")
+                            } else {
+                                ("Setting", "Value")
+                            };
+                            out.push(StyledLine::TableHeader {
+                                key_cols,
+                                left,
+                                right,
+                            });
+                            table_open = true;
+                        }
                         let val_cols = cols.saturating_sub(key_cols).max(14);
                         for (i, line) in wrap_words(desc, val_cols).into_iter().enumerate() {
                             out.push(StyledLine::KeyRow {
@@ -279,6 +296,7 @@ impl HelpDialog {
                             });
                         }
                     } else {
+                        table_open = false;
                         out.push(StyledLine::KeyRow {
                             key: key.to_string(),
                             val: String::new(),
@@ -299,7 +317,14 @@ impl HelpDialog {
                         out.push(StyledLine::Code(format!(" {line}")));
                     }
                 }
-                RawDocItem::Spacer => out.push(StyledLine::Spacer),
+                RawDocItem::Spacer => {
+                    table_open = false;
+                    out.push(StyledLine::Spacer);
+                }
+            }
+
+            if !matches!(item, RawDocItem::KeyValue(_, _)) {
+                table_open = false;
             }
         }
 
@@ -677,7 +702,11 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "Toggle built-in editor / editor+terminal split",
             ),
             RawDocItem::KeyValue(
-                "edit [path] (in Ocean shell)",
+                "edit [path] / Ctrl+Shift+O",
+                "Open the code editor in a separate window and keep the terminal window",
+            ),
+            RawDocItem::KeyValue(
+                "edit --here [path] (in Ocean shell)",
                 "Switch this window into editor mode without opening a new window",
             ),
             RawDocItem::KeyValue(
@@ -689,8 +718,16 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "File / Edit / View / Go / Help menus with recent files and quick open",
             ),
             RawDocItem::KeyValue(
+                "Ctrl+P / Ctrl+F",
+                "Bottom `:` command palette / bottom `/` in-file search line",
+            ),
+            RawDocItem::KeyValue(
                 "Ctrl+Shift+F / Ctrl+Enter",
                 "Workspace search panel; Ctrl+Enter replaces all after confirmation",
+            ),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+G",
+                "Git changes panel: branch, modified/untracked files, gutter markers and inline blame",
             ),
             RawDocItem::KeyValue(
                 "Alt+Click / Ctrl+Alt+Up/Down",
@@ -727,6 +764,14 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
             RawDocItem::Heading("Configuration (~/.config/ocean/config)"),
             RawDocItem::Body(
                 "Ocean uses Ghostty-compatible `key = value` configuration and hot-reloads automatically when you save the file or press Ctrl+Shift+R.",
+            ),
+            RawDocItem::Spacer,
+            RawDocItem::Heading("Editor Typography"),
+            RawDocItem::Code(
+                "editor-font-scale = 0.92   # fraction of font-size for editor windows",
+            ),
+            RawDocItem::Code(
+                "font-size = 13.5           # shared base size for terminal and editor",
             ),
             RawDocItem::Spacer,
             RawDocItem::Heading("View & Edit Config in Terminal (nano)"),
@@ -785,7 +830,7 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
             RawDocItem::Spacer,
             RawDocItem::Heading("Myanmar Font & Legacy Zawgyi Settings"),
             RawDocItem::Code("font-family-myanmar = Padauk"),
-            RawDocItem::Code("myanmar-font-scale  = 0.96"),
+            RawDocItem::Code("myanmar-font-scale  = 1.12"),
             RawDocItem::Code("myanmar-zawgyi      = off   # toggle live with Ctrl+Shift+M"),
             RawDocItem::Spacer,
             RawDocItem::Bullet(
@@ -802,10 +847,18 @@ mod tests {
     #[test]
     fn help_dialog_wraps_all_sections_within_column_budget() {
         let mut dlg = HelpDialog::new();
+        assert!(dlg.version.starts_with('v'));
         let geom = dlg.compute_geometry(9.0, 20.0, 960, 600, 1.0, 26.0);
         assert_eq!(geom.tabs.len(), 5);
         assert!(geom.visible_rows >= 10);
+        assert!(geom.modal.w >= 900.0);
         assert!(geom.modal.y + geom.modal.h <= 600.0 - 26.0);
+        dlg.active_tab = 2;
+        assert!(
+            dlg.wrapped_lines(geom.max_cols)
+                .iter()
+                .any(|line| matches!(line, StyledLine::TableHeader { .. }))
+        );
 
         for section in 0..SECTION_TITLES.len() {
             dlg.active_tab = section;
@@ -818,6 +871,9 @@ mod tests {
                     }
                     StyledLine::Bullet { text, .. } => {
                         assert!(display_cols(text) + 2 <= geom.max_cols);
+                    }
+                    StyledLine::TableHeader { key_cols, .. } => {
+                        assert!(*key_cols < geom.max_cols);
                     }
                     StyledLine::KeyRow { key, val, key_cols } => {
                         if val.is_empty() {

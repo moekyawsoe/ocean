@@ -122,10 +122,54 @@ impl Dimensions for GridDims {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ZeroWidthChars {
+    buf: [char; 3],
+    len: u8,
+}
+
+impl ZeroWidthChars {
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            buf: ['\0'; 3],
+            len: 0,
+        }
+    }
+
+    #[inline]
+    pub fn from_slice(slice: &[char]) -> Self {
+        let mut zw = Self::new();
+        for &c in slice.iter().take(3) {
+            zw.buf[zw.len as usize] = c;
+            zw.len += 1;
+        }
+        zw
+    }
+
+    #[inline]
+    pub fn as_slice(&self) -> &[char] {
+        &self.buf[..self.len as usize]
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl std::ops::Deref for ZeroWidthChars {
+    type Target = [char];
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RenderCell {
     pub c: char,
-    pub zerowidth: Vec<char>,
+    pub zerowidth: ZeroWidthChars,
     pub fg: Rgb,
     pub bg: Rgb,
     pub fg_alpha: f32,
@@ -141,7 +185,7 @@ impl Default for RenderCell {
     fn default() -> Self {
         Self {
             c: ' ',
-            zerowidth: Vec::new(),
+            zerowidth: ZeroWidthChars::new(),
             fg: Rgb::new(230, 237, 243),
             bg: Rgb::new(13, 19, 26),
             fg_alpha: 1.0,
@@ -194,8 +238,10 @@ impl TerminalSession {
         proxy: EventLoopProxy<AppEvent>,
         wakeup_queued: Arc<AtomicBool>,
     ) -> Result<Self, String> {
-        let mut term_cfg = TermConfig::default();
-        term_cfg.scrolling_history = config.scrollback_limit;
+        let term_cfg = TermConfig {
+            scrolling_history: config.scrollback_limit,
+            ..Default::default()
+        };
 
         let listener = OceanListener {
             tab_id: id,
@@ -320,8 +366,10 @@ impl TerminalSession {
     }
 
     pub fn update_config(&self, config: &Config) {
-        let mut term_cfg = TermConfig::default();
-        term_cfg.scrolling_history = config.scrollback_limit;
+        let term_cfg = TermConfig {
+            scrolling_history: config.scrollback_limit,
+            ..Default::default()
+        };
         self.term.lock().set_options(term_cfg);
     }
 
@@ -531,12 +579,10 @@ pub fn snapshot_from_term<T: EventListener>(
                 1.0
             };
 
-            let mut zw = Vec::new();
-            if let Some(zslice) = cell.zerowidth()
-                && !zslice.is_empty()
-            {
-                zw.extend_from_slice(zslice);
-            }
+            let zw = match cell.zerowidth() {
+                Some(zslice) if !zslice.is_empty() => ZeroWidthChars::from_slice(zslice),
+                _ => ZeroWidthChars::new(),
+            };
 
             snap.cells.push(RenderCell {
                 c: cell.c,

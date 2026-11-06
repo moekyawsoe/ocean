@@ -37,6 +37,7 @@ impl StatusMode {
 pub enum StatusClickTarget {
     Execute(Action),
     OpenThemeMenu,
+    ToggleMetricsDetail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,6 +83,7 @@ pub struct StatusBarGeometry {
     pub info_pill: Option<StatusPill>,
     pub chips: Vec<StatusChip>,
     pub zawgyi_pill: Option<StatusPill>,
+    pub resource_pill: Option<StatusPill>,
     pub theme_pill: Option<StatusPill>,
     pub update_pill: Option<StatusPill>,
 }
@@ -101,11 +103,7 @@ impl StatusBarHover {
     }
 
     pub fn clear(&mut self) -> bool {
-        if self.hovered_id.take().is_some() {
-            true
-        } else {
-            false
-        }
+        self.hovered_id.take().is_some()
     }
 }
 
@@ -118,6 +116,7 @@ pub struct StatusBarContext<'a> {
     pub context_menu: Option<&'a ContextMenu>,
     pub help_dialog: Option<&'a HelpDialog>,
     pub available_update: Option<&'a crate::update::UpdateInfo>,
+    pub metrics: Option<&'a crate::metrics::ProcessMetrics>,
 }
 
 impl StatusBarGeometry {
@@ -154,6 +153,12 @@ impl StatusBarGeometry {
         {
             return Some(5);
         }
+        if let Some(res) = &self.resource_pill
+            && res.target.is_some()
+            && res.rect.contains(px, py)
+        {
+            return Some(6);
+        }
         for (i, chip) in self.chips.iter().enumerate() {
             if chip.target.is_some() && chip.hit_rect.contains(px, py) {
                 return Some(100 + i);
@@ -169,6 +174,7 @@ impl StatusBarGeometry {
             3 => self.zawgyi_pill.as_ref().and_then(|p| p.target.clone()),
             4 => self.theme_pill.as_ref().and_then(|p| p.target.clone()),
             5 => self.update_pill.as_ref().and_then(|p| p.target.clone()),
+            6 => self.resource_pill.as_ref().and_then(|p| p.target.clone()),
             id if id >= 100 => self.chips.get(id - 100).and_then(|c| c.target.clone()),
             _ => None,
         }
@@ -269,9 +275,10 @@ impl StatusBarGeometry {
             None
         };
 
-        // 3. Right status pills (Theme pill + optional Zawgyi badge), gracefully omitted on very narrow windows
+        // 3. Right status pills (Theme pill + optional Resource / Zawgyi / Update badge)
         let mut right_limit = w - (6.0 * sf).round();
         let mut theme_pill = None;
+        let mut resource_pill = None;
         let mut zawgyi_pill = None;
 
         let total_cols = (w / cw).floor() as usize;
@@ -293,6 +300,35 @@ impl StatusBarGeometry {
                     target: Some(StatusClickTarget::OpenThemeMenu),
                 });
                 right_limit = th_x - (8.0 * sf).round();
+            }
+        }
+
+        // Ocean System Resource Usage pill (compact or detail)
+        if let Some(metrics) = ctx.metrics
+            && total_cols >= 64
+        {
+            let res_label = if total_cols >= 82 {
+                metrics.current_display()
+            } else {
+                &metrics.mem_only_label
+            };
+            let res_txt = format!(" {res_label} ");
+            let res_pad = (4.0 * sf).round();
+            let res_w = (res_txt.chars().count() as f32 * cw + res_pad * 2.0).round();
+            let res_x = (right_limit - res_w).round();
+            if res_x > left_cursor + 24.0 * cw {
+                resource_pill = Some(StatusPill {
+                    rect: BarRect {
+                        x: res_x,
+                        y: bar_y + 1.0,
+                        w: res_w,
+                        h: (bar_h - 1.0).max(1.0),
+                    },
+                    text_x: (res_x + res_pad).round(),
+                    text: res_txt,
+                    target: Some(StatusClickTarget::ToggleMetricsDetail),
+                });
+                right_limit = res_x - (8.0 * sf).round();
             }
         }
 
@@ -399,6 +435,7 @@ impl StatusBarGeometry {
             info_pill,
             chips,
             zawgyi_pill,
+            resource_pill,
             theme_pill,
             update_pill,
         })
@@ -651,6 +688,7 @@ mod tests {
             context_menu: None,
             help_dialog: None,
             available_update: None,
+            metrics: None,
         };
         let geom = StatusBarGeometry::compute(&cfg, &ctx, 9.0, 20.0, 1010, 660, 1.0)
             .expect("status bar visible by default");
@@ -700,6 +738,7 @@ mod tests {
             context_menu: Some(&menu),
             help_dialog: None,
             available_update: None,
+            metrics: None,
         };
         let menu_geom =
             StatusBarGeometry::compute(&cfg, &menu_ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
@@ -716,6 +755,7 @@ mod tests {
             context_menu: Some(&menu),
             help_dialog: None,
             available_update: None,
+            metrics: None,
         };
         let theme_geom =
             StatusBarGeometry::compute(&cfg, &theme_ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
@@ -747,6 +787,7 @@ mod tests {
             context_menu: None,
             help_dialog: None,
             available_update: Some(&update),
+            metrics: None,
         };
         let geom = StatusBarGeometry::compute(&cfg, &ctx, 9.0, 20.0, 1010, 660, 1.0).unwrap();
         assert!(geom.update_pill.is_some());
@@ -755,6 +796,33 @@ mod tests {
         assert_eq!(
             geom.click_at(pill.rect.x + 2.0, pill.rect.y + 2.0),
             Some(StatusClickTarget::Execute(Action::TriggerUpdate))
+        );
+    }
+
+    #[test]
+    fn status_bar_renders_resource_pill_when_metrics_available() {
+        let cfg = Config::default();
+        let mut metrics = crate::metrics::ProcessMetrics::new();
+        metrics.compact_label = "0.5% · 38M (178M)".to_string();
+        let ctx = StatusBarContext {
+            active_pane_index: 0,
+            num_panes: 1,
+            num_tabs: 1,
+            display_offset: 0,
+            tui_mode: false,
+            context_menu: None,
+            help_dialog: None,
+            available_update: None,
+            metrics: Some(&metrics),
+        };
+        let geom = StatusBarGeometry::compute(&cfg, &ctx, 9.0, 20.0, 1010, 660, 1.0)
+            .expect("status bar visible");
+        assert!(geom.resource_pill.is_some());
+        let pill = geom.resource_pill.as_ref().unwrap();
+        assert!(pill.text.contains("0.5% · 38M (178M)"));
+        assert_eq!(
+            geom.click_at(pill.rect.x + 2.0, pill.rect.y + 2.0),
+            Some(StatusClickTarget::ToggleMetricsDetail)
         );
     }
 }

@@ -197,11 +197,10 @@ impl FontSystem {
         let mut mono = Vec::new();
         let mut myanmar = Vec::new();
         for face in self.db.faces() {
-            if let Some((fam, _)) = face.families.first() {
-                if face.monospaced && !mono.contains(fam) {
+            if let Some((fam, _)) = face.families.first()
+                && face.monospaced && !mono.contains(fam) {
                     mono.push(fam.clone());
                 }
-            }
         }
         mono.sort();
 
@@ -324,12 +323,13 @@ impl FontSystem {
                 push_unique(&mut chain, id);
             }
 
-            // Symbol & Emoji fallbacks
-            for &sym in DEFAULT_SYMBOL_EMOJI_CANDIDATES {
+            // Lightweight symbol fallback (Nerd Fonts); heavy emoji is lazy-loaded on-demand when rendered
+            for &sym in &["Symbols Nerd Font Mono", "Symbols Nerd Font", "DejaVu Sans Mono"] {
                 if let Some(id) =
                     self.query_and_load(Family::Name(sym), Weight::NORMAL, Style::Normal, false)
                 {
                     push_unique(&mut chain, id);
+                    break;
                 }
             }
 
@@ -361,13 +361,14 @@ impl FontSystem {
                 }
             }
 
-            // 3. Built-in priority Myanmar Unicode fonts
+            // 3. Built-in priority Myanmar Unicode fonts (break once top match is loaded to avoid duplicate font memory)
             for &cand in DEFAULT_MYANMAR_CANDIDATES {
                 if let Some(id) =
                     self.query_and_load(Family::Name(cand), weight, Style::Normal, true)
                     && self.fonts[id].glyph_id('\u{1000}') != 0
                 {
                     push_unique(&mut mm_chain, id);
+                    break;
                 }
             }
 
@@ -492,6 +493,17 @@ impl FontSystem {
             if self.fonts[fid].glyph_id(c) != 0 {
                 self.char_cache.insert((c, style), fid);
                 return fid;
+            }
+        }
+
+        // On-demand Symbol & Emoji resolution (loads Noto Color Emoji etc. only when encountered)
+        for &sym in DEFAULT_SYMBOL_EMOJI_CANDIDATES {
+            if let Some(id) =
+                self.query_and_load(Family::Name(sym), Weight::NORMAL, Style::Normal, false)
+                && self.fonts[id].glyph_id(c) != 0
+            {
+                self.char_cache.insert((c, style), id);
+                return id;
             }
         }
 

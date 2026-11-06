@@ -118,6 +118,7 @@ pub struct Config {
     pub font_family_bold_italic: Option<String>,
     pub font_family_myanmar: Option<String>,
     pub font_size: f32,
+    pub editor_font_scale: f32,
     pub font_thicken: bool,
     pub font_features: Vec<String>,
     pub myanmar_font_scale: f32,
@@ -189,9 +190,10 @@ impl Default for Config {
             font_family_bold_italic: None,
             font_family_myanmar: None,
             font_size: 13.5,
+            editor_font_scale: 0.92,
             font_thicken: false,
             font_features: Vec::new(),
-            myanmar_font_scale: 0.96,
+            myanmar_font_scale: 1.12,
             myanmar_zawgyi: ZawgyiMode::Off,
             adjust_cell_width: MetricAdjust::Px(0),
             adjust_cell_height: MetricAdjust::Px(0),
@@ -351,15 +353,13 @@ impl Config {
 
             for line in content.lines() {
                 let trimmed = line.trim();
-                if !trimmed.starts_with('#') {
-                    if let Some((k, _)) = trimmed.split_once('=') {
-                        if k.trim() == "theme" {
+                if !trimmed.starts_with('#')
+                    && let Some((k, _)) = trimmed.split_once('=')
+                        && k.trim() == "theme" {
                             lines.push(format!("theme = {theme_name}"));
                             theme_updated = true;
                             continue;
                         }
-                    }
-                }
                 lines.push(line.to_string());
             }
         }
@@ -529,6 +529,15 @@ impl Config {
                     && (4.0..=120.0).contains(&sz)
                 {
                     self.font_size = sz;
+                } else {
+                    self.warn(line_no, key, val);
+                }
+            }
+            "editor-font-scale" | "editor-font-size-scale" => {
+                if let Ok(scale) = val.parse::<f32>()
+                    && (0.5..=1.5).contains(&scale)
+                {
+                    self.editor_font_scale = scale;
                 } else {
                     self.warn(line_no, key, val);
                 }
@@ -889,6 +898,7 @@ impl Config {
             out.push_str(&format!("font-family-myanmar = {}\n", mm));
         }
         out.push_str(&format!("font-size = {}\n", self.font_size));
+        out.push_str(&format!("editor-font-scale = {}\n", self.editor_font_scale));
         out.push_str(&format!("font-thicken = {}\n", self.font_thicken));
         out.push_str(&format!(
             "myanmar-font-scale = {}\n",
@@ -1041,6 +1051,7 @@ mod tests {
             font-family = Cascadia Code NF
             font-family = Padauk
             font-size = 15
+            editor-font-scale = 0.88
             theme = catppuccin-mocha
             background = #11161d
             background-opacity = 0.92
@@ -1058,6 +1069,7 @@ mod tests {
         assert!(cfg.warnings.is_empty(), "warnings: {:?}", cfg.warnings);
         assert_eq!(cfg.font_families, vec!["Cascadia Code NF", "Padauk"]);
         assert_eq!(cfg.font_size, 15.0);
+        assert_eq!(cfg.editor_font_scale, 0.88);
         assert_eq!(cfg.theme_name, "catppuccin-mocha");
         assert_eq!(cfg.colors.background, Rgb::new(0x11, 0x16, 0x1d));
         assert_eq!(cfg.colors.ansi[1], Rgb::new(0xff, 0x55, 0x55));
@@ -1177,8 +1189,10 @@ mod tests {
         let _ = fs::create_dir_all(&temp_dir);
         let cfg_path = temp_dir.join("ocean/config");
 
-        let mut cfg = Config::default();
-        cfg.loaded_path = Some(cfg_path.clone());
+        let mut cfg = Config {
+            loaded_path: Some(cfg_path.clone()),
+            ..Default::default()
+        };
 
         // First call: creates file from template
         assert!(!cfg_path.exists());

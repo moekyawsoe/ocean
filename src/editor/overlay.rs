@@ -20,6 +20,10 @@ pub enum PaletteAction {
     TriggerLspCompletion,
     RestartLsp,
     ToggleFileExplorer,
+    OpenEditorWindow,
+    ShowGitChanges,
+    ShowGitDiff,
+    GitRefresh,
 }
 
 #[derive(Debug, Clone)]
@@ -78,9 +82,29 @@ impl CommandPalette {
             action: PaletteAction::CloseFile,
         });
         self.all_items.push(PaletteItem {
+            title: "File: Open Editor in New Window (Ctrl+Shift+O)".to_string(),
+            description: "Open the current file or workspace in a separate window".to_string(),
+            action: PaletteAction::OpenEditorWindow,
+        });
+        self.all_items.push(PaletteItem {
             title: "Edit: Find / Search in File (Ctrl+F)".to_string(),
             description: "Open in-buffer interactive search bar".to_string(),
             action: PaletteAction::FindInFile,
+        });
+        self.all_items.push(PaletteItem {
+            title: "Git: Show Changes (Ctrl+Shift+G)".to_string(),
+            description: "Open the source control panel and refresh git status".to_string(),
+            action: PaletteAction::ShowGitChanges,
+        });
+        self.all_items.push(PaletteItem {
+            title: "Git: Show Diff for Current File".to_string(),
+            description: "Open the current file's diff against HEAD".to_string(),
+            action: PaletteAction::ShowGitDiff,
+        });
+        self.all_items.push(PaletteItem {
+            title: "Git: Refresh Status".to_string(),
+            description: "Re-run git status, diff markers, and blame".to_string(),
+            action: PaletteAction::GitRefresh,
         });
         self.all_items.push(PaletteItem {
             title: "View: Toggle File Explorer Sidebar (Ctrl+B)".to_string(),
