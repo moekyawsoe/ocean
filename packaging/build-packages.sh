@@ -38,7 +38,8 @@ esac
 sed -i "0,/^version = \".*\"/s//version = \"$CLEAN_VERSION\"/" "$ROOT_DIR/Cargo.toml"
 
 BIN_PATH="$ROOT_DIR/target/release/ocean"
-if [[ ! -x "$BIN_PATH" ]] || [[ "$("$BIN_PATH" --version 2>/dev/null | awk '{print $2}')" != "$CLEAN_VERSION" ]]; then
+FILE_BIN_PATH="$ROOT_DIR/target/release/ocean-file"
+if [[ ! -x "$BIN_PATH" ]] || [[ ! -x "$FILE_BIN_PATH" ]] || [[ "$("$BIN_PATH" --version 2>/dev/null | awk '{print $2}')" != "$CLEAN_VERSION" ]]; then
   echo "==> Building release binary for version $CLEAN_VERSION..."
   cargo build --release
 fi
@@ -54,8 +55,8 @@ populate_usr_tree() {
   local dest_root="$1"
   install -Dm755 "$BIN_PATH" "$dest_root/usr/bin/ocean"
   ln -sf ocean "$dest_root/usr/bin/edit"
-  ln -sf ocean "$dest_root/usr/bin/file"
-  ln -sf ocean "$dest_root/usr/bin/file-ocean"
+  install -Dm755 "$FILE_BIN_PATH" "$dest_root/usr/bin/ocean-file"
+  ln -sf ocean-file "$dest_root/usr/bin/file-ocean"
   install -Dm644 "$ROOT_DIR/packaging/linux/ocean.desktop" "$dest_root/usr/share/applications/ocean.desktop"
   install -Dm644 "$ROOT_DIR/packaging/linux/ocean.metainfo.xml" "$dest_root/usr/share/metainfo/ocean.metainfo.xml"
   install -Dm644 "$ROOT_DIR/assets/icons/ocean.svg" "$dest_root/usr/share/icons/hicolor/scalable/apps/ocean.svg"
@@ -141,7 +142,7 @@ cp -a "${RPM_PAYLOAD}/usr" %{buildroot}/usr
 %files
 %attr(0755, root, root) /usr/bin/ocean
 /usr/bin/edit
-/usr/bin/file
+/usr/bin/ocean-file
 /usr/bin/file-ocean
 /usr/share/applications/ocean.desktop
 /usr/share/metainfo/ocean.metainfo.xml

@@ -54,7 +54,7 @@ name = "ocean"
 path = "src/main.rs"
 
 [[bin]]
-name = "file"
+name = "ocean-file"
 path = "src/bin/file.rs"
 
 [profile.release]
@@ -74,7 +74,7 @@ section = "x11"
 priority = "optional"
 assets = [
     ["target/release/ocean", "usr/bin/", "755"],
-    ["target/release/file", "usr/bin/", "755"],
+    ["target/release/ocean-file", "usr/bin/", "755"],
     ["packaging/linux/ocean.desktop", "usr/share/applications/", "644"],
     ["packaging/linux/ocean.metainfo.xml", "usr/share/metainfo/", "644"],
     ["assets/icons/ocean.svg", "usr/share/icons/hicolor/scalable/apps/ocean.svg", "644"],
@@ -93,7 +93,7 @@ assets = [
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/ocean", dest = "/usr/bin/ocean", mode = "755" },
-    { source = "target/release/file", dest = "/usr/bin/file", mode = "755" },
+    { source = "target/release/ocean-file", dest = "/usr/bin/ocean-file", mode = "755" },
     { source = "packaging/linux/ocean.desktop", dest = "/usr/share/applications/ocean.desktop", mode = "644" },
     { source = "packaging/linux/ocean.metainfo.xml", dest = "/usr/share/metainfo/ocean.metainfo.xml", mode = "644" },
     { source = "assets/icons/ocean.svg", dest = "/usr/share/icons/hicolor/scalable/apps/ocean.svg", mode = "644" },
