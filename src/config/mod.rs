@@ -391,6 +391,68 @@ impl Config {
         Ok(target_path)
     }
 
+    /// Update or append multiple `key = value` options in the configuration file and persist to disk.
+    /// Preserves all existing comments, formatting, and unmodified keys.
+    pub fn save_setting_key_values(&mut self, updates: &[(&str, String)]) -> Result<PathBuf, String> {
+        let target_path = self
+            .loaded_path
+            .clone()
+            .or_else(Self::default_config_path)
+            .ok_or_else(|| "Could not determine config path".to_string())?;
+
+        let mut lines = Vec::new();
+        let mut keys_updated = std::collections::HashSet::new();
+
+        if target_path.exists() {
+            let content = fs::read_to_string(&target_path)
+                .map_err(|e| format!("Failed to read {}: {e}", target_path.display()))?;
+
+            for line in content.lines() {
+                let trimmed = line.trim();
+                let mut replaced = false;
+                if !trimmed.starts_with('#')
+                    && let Some((k, _)) = trimmed.split_once('=')
+                {
+                    let key = k.trim();
+                    for (u_key, u_val) in updates {
+                        if key == *u_key {
+                            lines.push(format!("{u_key} = {u_val}"));
+                            keys_updated.insert(u_key.to_string());
+                            replaced = true;
+                            break;
+                        }
+                    }
+                }
+                if !replaced {
+                    lines.push(line.to_string());
+                }
+            }
+        }
+
+        for (u_key, u_val) in updates {
+            if !keys_updated.contains(*u_key) {
+                lines.push(format!("{u_key} = {u_val}"));
+            }
+        }
+
+        if let Some(parent) = target_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
+        let mut new_content = lines.join("\n");
+        if !new_content.ends_with('\n') {
+            new_content.push('\n');
+        }
+
+        fs::write(&target_path, new_content)
+            .map_err(|e| format!("Failed to write {}: {e}", target_path.display()))?;
+
+        self.loaded_path = Some(target_path.clone());
+        self.last_modified = fs::metadata(&target_path).and_then(|m| m.modified()).ok();
+
+        Ok(target_path)
+    }
+
     fn apply_color_overrides(&mut self, ov: ColorOverrides) {
         if let Some(c) = ov.background {
             self.colors.background = c;

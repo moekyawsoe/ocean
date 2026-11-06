@@ -83,7 +83,18 @@ impl FileExplorer {
         }
 
         let mut out = Vec::new();
-        Self::scan_dir(&self.root_dir, 0, &self.expanded_dirs, &mut out);
+        let is_root_expanded = self.expanded_dirs.contains(&self.root_dir);
+        out.push(ExplorerEntry {
+            path: self.root_dir.clone(),
+            name: self.root_name.clone(),
+            is_dir: true,
+            depth: 0,
+            is_expanded: is_root_expanded,
+        });
+
+        if is_root_expanded {
+            Self::scan_dir(&self.root_dir, 1, &self.expanded_dirs, &mut out);
+        }
         self.entries = out;
     }
 
@@ -107,9 +118,8 @@ impl FileExplorer {
             let path = entry.path();
             let fname = entry.file_name().to_string_lossy().to_string();
 
-            // Skip noisy directories and hidden items
-            if fname == ".git"
-                || fname == "target"
+            // Skip noisy directories and temporary caches
+            if fname == "target"
                 || fname == "node_modules"
                 || fname == ".cache"
                 || fname == ".DS_Store"
@@ -238,23 +248,28 @@ pub mod tests {
 
         assert!(explorer.is_open());
         assert!(!explorer.entries.is_empty());
-        // Directory "subfolder" should be sorted before "a_file.txt"
-        assert_eq!(explorer.entries[0].name, "subfolder");
+        // Root directory entry is at index 0 (depth 0)
+        assert_eq!(explorer.entries[0].depth, 0);
         assert!(explorer.entries[0].is_dir);
-        assert!(!explorer.entries[0].is_expanded);
+        assert!(explorer.entries[0].is_expanded);
+
+        // Directory "subfolder" should be at index 1
+        assert_eq!(explorer.entries[1].name, "subfolder");
+        assert!(explorer.entries[1].is_dir);
+        assert!(!explorer.entries[1].is_expanded);
 
         // Expand subfolder
-        let file = explorer.toggle_expand(0);
+        let file = explorer.toggle_expand(1);
         assert!(file.is_none());
-        assert!(explorer.entries[0].is_expanded);
-        // Now child.txt should be visible at depth 1
-        assert!(explorer.entries.len() >= 3);
+        assert!(explorer.entries[1].is_expanded);
+        // Now child.txt should be visible at depth 2
+        assert!(explorer.entries.len() >= 4);
         let child = explorer
             .entries
             .iter()
             .find(|e| e.name == "child.txt")
             .unwrap();
-        assert_eq!(child.depth, 1);
+        assert_eq!(child.depth, 2);
 
         // Click file
         let file_idx = explorer

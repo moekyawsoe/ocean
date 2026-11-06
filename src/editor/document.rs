@@ -56,6 +56,7 @@ pub struct EditorDocument {
     pub syntax: SyntaxHighlighter,
     pub display_name: Option<String>,
     pub scroll_to_cursor_requested: bool,
+    pub is_settings: bool,
     line_cache: HashMap<usize, (u64, CachedLine)>,
 }
 
@@ -80,8 +81,16 @@ impl EditorDocument {
             syntax: SyntaxHighlighter::new(lang),
             display_name: None,
             scroll_to_cursor_requested: true,
+            is_settings: false,
             line_cache: HashMap::new(),
         }
+    }
+
+    pub fn new_settings() -> Self {
+        let mut doc = Self::new();
+        doc.display_name = Some("Settings".to_string());
+        doc.is_settings = true;
+        doc
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
@@ -99,6 +108,7 @@ impl EditorDocument {
             syntax: SyntaxHighlighter::new(lang),
             display_name: None,
             scroll_to_cursor_requested: true,
+            is_settings: false,
             line_cache: HashMap::new(),
         })
     }
@@ -123,17 +133,24 @@ impl EditorDocument {
             syntax: SyntaxHighlighter::new(language),
             display_name: None,
             scroll_to_cursor_requested: true,
+            is_settings: false,
             line_cache: HashMap::new(),
         }
     }
 
     pub fn file_name(&self) -> String {
+        if self.is_settings {
+            return "Settings".to_string();
+        }
         self.display_name
             .clone()
             .unwrap_or_else(|| self.buffer.file_name())
     }
 
     pub fn is_dirty(&self) -> bool {
+        if self.is_settings {
+            return false;
+        }
         self.buffer.dirty
     }
 
@@ -958,6 +975,18 @@ impl EditorDocument {
         let cluster_count = self.shaped_line(line, font_sys).cluster_count();
         self.selection_anchor = Some(Cursor::new(line, 0));
         self.cursor = Cursor::new(line, cluster_count);
+    }
+
+    pub fn select_all(&mut self, font_sys: &mut FontSystem) {
+        let total_lines = self.buffer.len_lines();
+        if total_lines == 0 {
+            return;
+        }
+        let last_line = total_lines.saturating_sub(1);
+        let last_clusters = self.shaped_line(last_line, font_sys).cluster_count();
+        self.selection_anchor = Some(Cursor::new(0, 0));
+        self.cursor = Cursor::new(last_line, last_clusters);
+        self.selection_kind = SelectionKind::Char;
     }
 
     pub fn undo(&mut self, font_sys: &mut FontSystem) {

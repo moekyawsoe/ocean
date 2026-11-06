@@ -46,6 +46,7 @@ pub enum IconId {
     FileShell,
     FileDocker,
     FilePlain,
+    Lock,
 }
 
 pub const ICON_TABLE: &[(IconId, &[u8], &[u8])] = &[
@@ -53,6 +54,11 @@ pub const ICON_TABLE: &[(IconId, &[u8], &[u8])] = &[
         IconId::Explorer,
         include_bytes!("../../assets/icons/ui/explorer-16.png"),
         include_bytes!("../../assets/icons/ui/explorer-32.png"),
+    ),
+    (
+        IconId::Lock,
+        include_bytes!("../../assets/icons/ui/dirty-16.png"),
+        include_bytes!("../../assets/icons/ui/dirty-32.png"),
     ),
     (
         IconId::Search,
@@ -312,6 +318,7 @@ impl IconId {
             Self::FileShell => '\u{f489}',
             Self::FileDocker => '\u{e7b0}',
             Self::FilePlain => '\u{f15b}',
+            Self::Lock => '\u{f023}',
         }
     }
 }
@@ -354,6 +361,12 @@ pub fn file_icon_for(path: &Path, is_dir: bool, expanded: bool) -> IconId {
     if name == "dockerfile" {
         return IconId::FileDocker;
     }
+    if name == ".gitignore" || name == ".gitmodules" || name.starts_with(".git") {
+        return IconId::Git;
+    }
+    if name == "cargo.lock" || name.ends_with(".lock") {
+        return IconId::Lock;
+    }
 
     let language = Language::from_path(path);
     match language {
@@ -381,9 +394,11 @@ pub fn file_icon_for_name(name: &str) -> IconId {
 /// VSCode-like tint for file-type glyphs rendered from Nerd Fonts.
 pub fn icon_color(icon: IconId, theme: &ThemePalette, alpha: f32) -> [f32; 4] {
     let color = match icon {
-        IconId::FileRust | IconId::FileJavascript | IconId::FileJson | IconId::FileToml => {
-            theme.ansi[3]
-        }
+        IconId::FileRust
+        | IconId::FileJavascript
+        | IconId::FileJson
+        | IconId::FileToml
+        | IconId::Lock => theme.ansi[3],
         IconId::FileTypescript
         | IconId::FileC
         | IconId::FileCpp
@@ -391,7 +406,7 @@ pub fn icon_color(icon: IconId, theme: &ThemePalette, alpha: f32) -> [f32; 4] {
         | IconId::FileMarkdown
         | IconId::FileDocker => theme.ansi[4],
         IconId::FilePython | IconId::FileGo => theme.ansi[6],
-        IconId::FileHtml => theme.ansi[1],
+        IconId::FileHtml | IconId::Git => theme.ansi[1],
         IconId::FileShell => theme.ansi[2],
         _ => theme.foreground,
     };

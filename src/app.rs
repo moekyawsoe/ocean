@@ -1679,6 +1679,23 @@ impl OceanApp {
                 self.editor.editor_focused = true;
                 self.editor.open_command_palette(&workspace);
             }
+            MenuAction::OpenSettings => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.editor_focused = true;
+                self.editor.open_settings(&self.config);
+            }
+            MenuAction::SelectAll => {
+                if let Some(font_sys) = &mut self.font_sys {
+                    self.editor.active_doc().select_all(font_sys);
+                }
+            }
+            MenuAction::SearchPanel => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.active_panel = crate::editor::SidebarPanel::Search;
+                self.editor.explorer.visible = true;
+                self.editor.search.active = true;
+                self.editor.editor_focused = true;
+            }
             MenuAction::SaveFile => {
                 if let Err(err) = self.editor.save_active_document() {
                     eprintln!("ocean: {err}");
@@ -3394,6 +3411,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                     font_sys,
                                     self.modifiers,
                                     self.proxy.clone(),
+                                    &mut self.config,
                                 );
                             }
                             if self.editor.take_close_confirm() {

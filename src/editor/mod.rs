@@ -6,6 +6,7 @@ pub mod lsp;
 pub mod myanmar;
 pub mod overlay;
 pub mod plugin;
+pub mod settings;
 pub mod syntax;
 pub mod view;
 pub mod vim;
@@ -26,6 +27,7 @@ use crate::editor::overlay::{
     CommandPalette, CompletionOverlay, FindBar, HoverOverlay, PaletteAction,
 };
 use crate::editor::plugin::PluginEngine;
+pub use crate::editor::settings::{SettingsCategory, SettingsDraft, SettingsState};
 use crate::editor::view::{EditorView, EditorViewport};
 use crate::editor::vim::{VimMode, VimOperator, VimState};
 use crate::font::FontSystem;
@@ -120,6 +122,7 @@ pub struct EditorWorkspace {
     pub search: WorkspaceSearch,
     pub git: GitStatus,
     pub metrics_label: Option<String>,
+    pub settings_state: SettingsState,
     pending_replace_all: Option<usize>,
 }
 
@@ -161,7 +164,7 @@ impl EditorWorkspace {
             hover_request: None,
             vim: VimState::new(false),
             active_panel: SidebarPanel::Explorer,
-            activity_bar_visible: true,
+            activity_bar_visible: false,
             close_confirm_requested: false,
             ui_scale: 1.0,
             menu_height: 0.0,
@@ -169,6 +172,7 @@ impl EditorWorkspace {
             search: WorkspaceSearch::default(),
             git: GitStatus::default(),
             metrics_label: None,
+            settings_state: SettingsState::default(),
             pending_replace_all: None,
         }
     }
@@ -430,12 +434,24 @@ impl EditorWorkspace {
         line_h + 6.0
     }
 
-    pub fn breadcrumb_height(&self, line_h: f32) -> f32 {
-        if self.active_doc_ref().path().is_some() {
-            line_h + 4.0
-        } else {
-            0.0
+    pub fn breadcrumb_height(&self, _line_h: f32) -> f32 {
+        0.0
+    }
+
+    pub fn open_settings(&mut self, config: &Config) {
+        self.settings_state.reload_from_config(config);
+        if let Some(idx) = self.documents.iter().position(|d| d.is_settings) {
+            self.active_doc_idx = idx;
+            return;
         }
+        let doc = EditorDocument::new_settings();
+        self.documents.push(doc);
+        self.active_doc_idx = self.documents.len() - 1;
+    }
+
+    pub fn open_settings_default(&mut self) {
+        let cfg = Config::load(None);
+        self.open_settings(&cfg);
     }
 
     pub fn content_top(&self, vp_y: f32, line_h: f32) -> f32 {
@@ -966,6 +982,15 @@ impl EditorWorkspace {
             return true;
         }
 
+        // Ctrl+, : Open Settings
+        if ctrl
+            && !shift
+            && matches!(&event.logical_key, Key::Character(s) if s == ",")
+        {
+            self.open_settings_default();
+            return true;
+        }
+
         // Ctrl+\ : Toggle Split Mode
         if ctrl && matches!(&event.logical_key, Key::Character(s) if s == "\\" || s == "|") {
             self.mode = match self.mode {
@@ -1441,6 +1466,7 @@ impl EditorWorkspace {
         font_sys: &mut FontSystem,
         modifiers: ModifiersState,
         proxy: EventLoopProxy<AppEvent>,
+        config: &mut Config,
     ) -> bool {
         if button != MouseButton::Left {
             return false;
@@ -1532,15 +1558,37 @@ impl EditorWorkspace {
 
             // Check click within sidebar
             if px >= sx && px < sx + sidebar_w {
+                let header_h = (line_h + 6.0).round();
+                let ui = self.ui_scale.max(0.5);
+
+                if py >= vp.y && py < vp.y + header_h {
+                    if px >= sx + 4.0 * ui && px < sx + 54.0 * ui {
+                        self.active_panel = SidebarPanel::Explorer;
+                        self.explorer.visible = true;
+                        return true;
+                    } else if px >= sx + 54.0 * ui && px < sx + 98.0 * ui {
+                        self.active_panel = SidebarPanel::Search;
+                        self.explorer.visible = true;
+                        self.search.active = true;
+                        return true;
+                    } else if px >= sx + 98.0 * ui && px < sx + 170.0 * ui {
+                        self.active_panel = SidebarPanel::Git;
+                        self.explorer.visible = true;
+                        self.refresh_git();
+                        return true;
+                    } else if px >= sx + sidebar_w - 48.0 * ui && px < sx + sidebar_w - 24.0 * ui {
+                        self.explorer.visible = false;
+                        return true;
+                    } else if px >= sx + sidebar_w - 24.0 * ui && px <= sx + sidebar_w {
+                        self.open_settings(config);
+                        return true;
+                    }
+                    return true;
+                }
+
                 match self.active_panel {
                     SidebarPanel::Explorer => {
-                        let header_h = (line_h + 6.0).round();
                         let item_h = (line_h + 3.0).round();
-
-                        if py >= vp.y && py < vp.y + header_h {
-                            self.explorer.refresh();
-                            return true;
-                        }
 
                         if let Some(idx) = self
                             .explorer
@@ -1648,17 +1696,28 @@ impl EditorWorkspace {
 
         // Check if clicked in the always-visible document tab bar
         let ed_tab_h = (line_h + 6.0).round();
+        let ui = self.ui_scale.max(0.5);
         if py >= code_vp.y && py <= code_vp.y + ed_tab_h {
+            let collapsed_pad = if !panel_open { 46.0 * ui } else { 0.0 };
+            if !panel_open {
+                if px >= code_vp.x + 4.0 * ui && px < code_vp.x + 24.0 * ui {
+                    self.explorer.visible = true;
+                    return true;
+                } else if px >= code_vp.x + 24.0 * ui && px < code_vp.x + 44.0 * ui {
+                    self.open_settings(config);
+                    return true;
+                }
+            }
+
             let count = self.documents.len().max(1);
-            let tab_w = (180.0_f32).min((code_vp.w - 40.0) / count as f32).max(60.0);
-            let relative = px - code_vp.x - 4.0;
+            let tab_w = (180.0_f32).min((code_vp.w - 40.0 - collapsed_pad) / count as f32).max(60.0);
+            let relative = px - code_vp.x - 4.0 - collapsed_pad;
             let tab_idx = (relative / (tab_w + 4.0)).floor();
             if tab_idx >= 0.0 {
                 let tab_idx = tab_idx as usize;
                 if tab_idx < self.documents.len() {
-                    let tab_x = code_vp.x + 4.0 + tab_idx as f32 * (tab_w + 4.0);
+                    let tab_x = code_vp.x + 4.0 + collapsed_pad + tab_idx as f32 * (tab_w + 4.0);
                     self.active_doc_idx = tab_idx;
-                    let ui = self.ui_scale.max(0.5);
                     if px >= tab_x + tab_w - 22.0 * ui && px <= tab_x + tab_w {
                         self.request_close_active();
                     }
@@ -1666,8 +1725,7 @@ impl EditorWorkspace {
                 }
             }
 
-            let ui = self.ui_scale.max(0.5);
-            let plus_x = code_vp.x + 4.0 + count as f32 * (tab_w + 4.0);
+            let plus_x = code_vp.x + 4.0 + collapsed_pad + count as f32 * (tab_w + 4.0);
             if plus_x + 22.0 * ui <= code_vp.x + code_vp.w
                 && px >= plus_x
                 && px <= plus_x + (ed_tab_h - 4.0 * ui)
@@ -1676,6 +1734,23 @@ impl EditorWorkspace {
                 self.active_doc_idx = self.documents.len() - 1;
                 return true;
             }
+        }
+
+        if self.active_doc().is_settings {
+            let content_y = code_vp.y + ed_tab_h;
+            let status_h = (line_h * 0.80 + 4.0).round();
+            let content_h = (code_vp.y + code_vp.h - status_h - content_y).max(1.0);
+            return self.handle_settings_click(
+                px,
+                py,
+                code_vp.x,
+                content_y,
+                code_vp.w,
+                content_h,
+                ui,
+                line_h,
+                config,
+            );
         }
 
         // Check if clicked in Code text area or Scrollbar
@@ -1754,6 +1829,159 @@ impl EditorWorkspace {
             self.active_doc().select_word_at_cursor(font_sys);
         } else if self.click_count == 0 {
             self.active_doc().select_line_at_cursor(font_sys);
+        }
+
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_settings_click(
+        &mut self,
+        px: f32,
+        py: f32,
+        vx: f32,
+        vy: f32,
+        vw: f32,
+        vh: f32,
+        ui: f32,
+        line_h: f32,
+        config: &mut Config,
+    ) -> bool {
+        let cat_h = (28.0 * ui).max(line_h);
+
+        // 1. Categories bar click
+        if py >= vy && py <= vy + cat_h {
+            if px >= vx + 16.0 * ui && px < vx + 76.0 * ui {
+                self.settings_state.active_category = SettingsCategory::General;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            } else if px >= vx + 76.0 * ui && px < vx + 136.0 * ui {
+                self.settings_state.active_category = SettingsCategory::Editor;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            } else if px >= vx + 136.0 * ui && px < vx + 236.0 * ui {
+                self.settings_state.active_category = SettingsCategory::Appearance;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            } else if px >= vx + 236.0 * ui && px < vx + 306.0 * ui {
+                self.settings_state.active_category = SettingsCategory::Sidebar;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            } else if px >= vx + 306.0 * ui && px < vx + 386.0 * ui {
+                self.settings_state.active_category = SettingsCategory::Terminal;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            } else if px >= vx + 386.0 * ui && px < vx + 450.0 * ui {
+                self.settings_state.active_category = SettingsCategory::Diff;
+                self.settings_state.scroll_y = 0.0;
+                return true;
+            }
+        }
+
+        // 2. Bottom buttons (Cancel / Apply)
+        let bottom_h = 42.0 * ui;
+        let bottom_y = vy + vh - bottom_h;
+        if py >= bottom_y {
+            let apply_w = 64.0 * ui;
+            let apply_x = vx + vw - apply_w - 20.0 * ui;
+            let cancel_w = 64.0 * ui;
+            let cancel_x = apply_x - cancel_w - 12.0 * ui;
+
+            if px >= apply_x && px <= apply_x + apply_w {
+                let _ = self.settings_state.apply(config);
+                return true;
+            } else if px >= cancel_x && px <= cancel_x + cancel_w {
+                self.settings_state.reload_from_config(config);
+                self.request_close_active();
+                return true;
+            }
+            return true;
+        }
+
+        // 3. Settings items content
+        let content_y = vy + cat_h + 24.0 * ui - self.settings_state.scroll_y;
+        let item_h = (26.0 * ui).max(line_h);
+
+        match self.settings_state.active_category {
+            SettingsCategory::General => {
+                let row0 = content_y + item_h + 8.0 * ui;
+                let row1 = row0 + item_h;
+                let row2 = row1 + item_h + 20.0 * ui + item_h + 8.0 * ui;
+                let row3 = row2 + item_h + 20.0 * ui + item_h + 8.0 * ui;
+
+                if py >= row0 && py < row0 + item_h {
+                    self.settings_state.toggle_option(SettingsCategory::General, 0);
+                    return true;
+                } else if py >= row1 && py < row1 + item_h {
+                    self.settings_state.toggle_option(SettingsCategory::General, 1);
+                    return true;
+                } else if py >= row2 && py < row2 + item_h {
+                    self.settings_state.toggle_option(SettingsCategory::General, 2);
+                    return true;
+                } else if py >= row3 && py < row3 + item_h {
+                    self.settings_state.toggle_option(SettingsCategory::General, 3);
+                    return true;
+                }
+            }
+            SettingsCategory::Editor => {
+                let mut cur = content_y + item_h + 8.0 * ui;
+                for idx in 0..8 {
+                    if idx == 2 {
+                        cur += 20.0 * ui + item_h + 8.0 * ui;
+                    }
+                    if py >= cur && py < cur + item_h {
+                        self.settings_state.toggle_option(SettingsCategory::Editor, idx);
+                        return true;
+                    }
+                    cur += item_h;
+                }
+            }
+            SettingsCategory::Appearance => {
+                let mut cur = content_y + item_h + 8.0 * ui;
+                for idx in 0..7 {
+                    if idx == 5 {
+                        cur += 20.0 * ui + item_h + 8.0 * ui;
+                    }
+                    if py >= cur && py < cur + item_h {
+                        self.settings_state.toggle_option(SettingsCategory::Appearance, idx);
+                        return true;
+                    }
+                    cur += item_h;
+                }
+            }
+            SettingsCategory::Sidebar => {
+                let mut cur = content_y + item_h + 8.0 * ui;
+                for idx in 0..6 {
+                    if idx == 3 {
+                        cur += 20.0 * ui + item_h + 8.0 * ui;
+                    }
+                    if py >= cur && py < cur + item_h {
+                        self.settings_state.toggle_option(SettingsCategory::Sidebar, idx);
+                        return true;
+                    }
+                    cur += item_h;
+                }
+            }
+            SettingsCategory::Terminal => {
+                let mut cur = content_y + item_h + 8.0 * ui;
+                for idx in 0..3 {
+                    if py >= cur && py < cur + item_h {
+                        self.settings_state.toggle_option(SettingsCategory::Terminal, idx);
+                        return true;
+                    }
+                    cur += item_h;
+                }
+            }
+            SettingsCategory::Diff => {
+                let mut cur = content_y + item_h + 8.0 * ui;
+                for idx in 0..4 {
+                    if py >= cur && py < cur + item_h {
+                        self.settings_state.toggle_option(SettingsCategory::Diff, idx);
+                        return true;
+                    }
+                    cur += item_h;
+                }
+            }
         }
 
         true
@@ -1992,6 +2220,15 @@ impl EditorWorkspace {
                     }
                 }
             }
+            return true;
+        }
+
+        if self.active_doc().is_settings {
+            let dy = match delta {
+                MouseScrollDelta::LineDelta(_, y) => y * multiplier * 24.0,
+                MouseScrollDelta::PixelDelta(p) => p.y as f32 * multiplier,
+            };
+            self.settings_state.scroll_y = (self.settings_state.scroll_y - dy).max(0.0);
             return true;
         }
 
@@ -2382,6 +2619,7 @@ impl EditorWorkspace {
             ui_scale,
             self.menu_height,
             self.metrics_label.as_deref(),
+            Some(&self.settings_state),
         );
     }
 }

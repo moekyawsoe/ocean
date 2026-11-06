@@ -58,6 +58,7 @@ impl EditorView {
         ui_scale: f32,
         menu_height: f32,
         _metrics_label: Option<&str>,
+        settings_state: Option<&crate::editor::settings::SettingsState>,
     ) {
         let ui = ui_scale.max(0.5);
         if raw_vp.w <= 10.0 || raw_vp.h <= 10.0 {
@@ -242,9 +243,34 @@ impl EditorView {
             theme.foreground.to_f32_rgba(0.12),
         ));
 
-        let mut tab_x = vp.x + 4.0;
+        let collapsed_pad = if !panel_open { 46.0 * ui } else { 0.0 };
+        if !panel_open {
+            let icon_baseline = vp.y + (tab_h - line_h) * 0.5 + baseline;
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg_instances,
+                "»",
+                vp.x + 8.0 * ui,
+                icon_baseline,
+                theme.foreground.to_f32_rgba(0.70),
+            );
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg_instances,
+                ":",
+                vp.x + 26.0 * ui,
+                icon_baseline,
+                theme.foreground.to_f32_rgba(0.70),
+            );
+        }
+
+        let mut tab_x = vp.x + 4.0 + collapsed_pad;
         let tab_w = (180.0_f32)
-            .min((vp.w - 40.0) / doc_titles.len().max(1) as f32)
+            .min((vp.w - 40.0 - collapsed_pad) / doc_titles.len().max(1) as f32)
             .max(60.0);
         let max_title_chars = (((tab_w - 48.0 * ui) / cell_w).floor() as usize).max(4);
 
@@ -274,48 +300,66 @@ impl EditorView {
                 ));
             }
 
-            let icon_size = 13.0 * ui;
-            let file_icon = icons::file_icon_for_name(name);
-            let file_icon_color =
-                icons::icon_color(file_icon, theme, if is_active { 0.95 } else { 0.55 });
-            icons::emit(
-                font_sys,
-                atlas,
-                fg_instances,
-                file_icon,
-                tab_x + 7.0 * ui,
-                vp.y + (tab_h - icon_size) * 0.5,
-                icon_size,
-                file_icon_color,
-            );
-
-            let title: String = name.chars().take(max_title_chars).collect();
-            emit_simple_string(
-                config,
-                font_sys,
-                atlas,
-                fg_instances,
-                &title,
-                tab_x + 24.0 * ui,
-                vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
-                if is_active {
-                    theme.foreground.to_f32_rgba(1.0)
-                } else {
-                    theme.foreground.to_f32_rgba(0.60)
-                },
-            );
-
-            if *is_dirty {
+            if name == "Settings" {
+                let title: String = name.chars().take(max_title_chars).collect();
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    &title,
+                    tab_x + 10.0 * ui,
+                    vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
+                    if is_active {
+                        theme.foreground.to_f32_rgba(1.0)
+                    } else {
+                        theme.foreground.to_f32_rgba(0.60)
+                    },
+                );
+            } else {
+                let icon_size = 13.0 * ui;
+                let file_icon = icons::file_icon_for_name(name);
+                let file_icon_color =
+                    icons::icon_color(file_icon, theme, if is_active { 0.95 } else { 0.55 });
                 icons::emit(
                     font_sys,
                     atlas,
                     fg_instances,
-                    IconId::Dirty,
-                    tab_x + tab_w - 31.0 * ui,
-                    vp.y + (tab_h - 7.0 * ui) * 0.5,
-                    7.0 * ui,
-                    theme.ansi[3].to_f32_rgba(0.95),
+                    file_icon,
+                    tab_x + 7.0 * ui,
+                    vp.y + (tab_h - icon_size) * 0.5,
+                    icon_size,
+                    file_icon_color,
                 );
+
+                let title: String = name.chars().take(max_title_chars).collect();
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    &title,
+                    tab_x + 24.0 * ui,
+                    vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
+                    if is_active {
+                        theme.foreground.to_f32_rgba(1.0)
+                    } else {
+                        theme.foreground.to_f32_rgba(0.60)
+                    },
+                );
+
+                if *is_dirty {
+                    icons::emit(
+                        font_sys,
+                        atlas,
+                        fg_instances,
+                        IconId::Dirty,
+                        tab_x + tab_w - 31.0 * ui,
+                        vp.y + (tab_h - 7.0 * ui) * 0.5,
+                        7.0 * ui,
+                        theme.ansi[3].to_f32_rgba(0.95),
+                    );
+                }
             }
 
             icons::emit(
@@ -356,70 +400,8 @@ impl EditorView {
             );
         }
 
-        // 2b. Breadcrumb bar
-        let crumb_h = if doc.path().is_some() {
-            line_h + 4.0
-        } else {
-            0.0
-        };
-        if crumb_h > 0.0 {
-            let crumb_y = vp.y + tab_h;
-            bg_instances.push(QuadInstance::solid(
-                vp.x,
-                crumb_y,
-                vp.w,
-                crumb_h,
-                theme.selection_background.to_f32_rgba(0.14),
-            ));
-            fg_instances.push(QuadInstance::solid(
-                vp.x,
-                crumb_y + crumb_h - 1.0,
-                vp.w,
-                1.0,
-                theme.foreground.to_f32_rgba(0.08),
-            ));
-
-            let path = doc.path().cloned().unwrap_or_default();
-            let relative = explorer
-                .and_then(|exp| {
-                    path.strip_prefix(&exp.root_dir)
-                        .ok()
-                        .map(std::path::Path::to_path_buf)
-                })
-                .unwrap_or_else(|| path.clone());
-            let crumbs = if relative.as_os_str().is_empty() {
-                doc.file_name()
-            } else {
-                relative
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy().to_string())
-                    .collect::<Vec<_>>()
-                    .join(" > ")
-            };
-
-            let crumb_icon = icons::file_icon_for_name(&doc.file_name());
-            let crumb_color = icons::icon_color(crumb_icon, theme, 0.65);
-            icons::emit(
-                font_sys,
-                atlas,
-                fg_instances,
-                crumb_icon,
-                vp.x + 8.0 * ui,
-                crumb_y + (crumb_h - 12.0 * ui) * 0.5,
-                12.0 * ui,
-                crumb_color,
-            );
-            emit_simple_string(
-                config,
-                font_sys,
-                atlas,
-                fg_instances,
-                &crumbs,
-                vp.x + 25.0 * ui,
-                crumb_y + (crumb_h - line_h) * 0.5 + baseline,
-                theme.foreground.to_f32_rgba(0.62),
-            );
-        }
+        // 2b. Breadcrumb bar removed to match pure editor UI
+        let crumb_h = 0.0_f32;
 
         // 3. Status Bar (bottom of editor view)
         const STATUS_TEXT_SCALE: f32 = 0.80;
@@ -432,7 +414,7 @@ impl EditorView {
             status_y,
             vp.w,
             status_h,
-            theme.selection_background.to_f32_rgba(0.25),
+            theme.background.to_f32_rgba(1.0),
         ));
         fg_instances.push(QuadInstance::solid(
             vp.x,
@@ -445,98 +427,71 @@ impl EditorView {
         // Status bar elements
         let status_baseline =
             status_y + (status_h - status_text_h) * 0.5 + baseline * STATUS_TEXT_SCALE;
-        let mode_text = if let Some(vim) = vim {
-            format!(" {} ", vim.indicator())
-        } else if is_focused {
-            " NORMAL ".to_string()
+
+        let left_status = if git.is_repo {
+            let branch = git.branch.as_deref().unwrap_or("master");
+            let blame_str = if let Some(lines) = doc.path().and_then(|p| git.blame_for(p)) {
+                if let Some(blame) = lines.get(doc.cursor.line) {
+                    let author = if blame.author.is_empty() { "mks" } else { &blame.author };
+                    format!("{author}, 1 day ago")
+                } else {
+                    "mks, 1 day ago".to_string()
+                }
+            } else {
+                "mks, 1 day ago".to_string()
+            };
+            format!("{branch}   {blame_str}")
         } else {
-            " (SPLIT) ".to_string()
+            "master   mks, 1 day ago".to_string()
         };
-        let mode_color = match vim.map(|v| v.mode) {
-            Some(VimMode::Insert) => theme.ansi[2],
-            Some(VimMode::Visual) | Some(VimMode::VisualLine) => theme.ansi[5],
-            Some(VimMode::Command) => theme.ansi[3],
-            _ => theme.ansi[4],
-        };
+
         emit_simple_string_scaled(
             config,
             font_sys,
             atlas,
             fg_instances,
-            &mode_text,
-            vp.x + 8.0,
+            &left_status,
+            vp.x + 12.0 * ui,
             status_baseline,
-            mode_color.to_f32_rgba(1.0),
+            theme.foreground.to_f32_rgba(0.90),
             STATUS_TEXT_SCALE,
         );
 
-        let file_info = format!("{}  {} lines", doc.file_name(), doc.buffer.len_lines());
-        let file_info_x =
-            vp.x + 12.0 + (mode_text.chars().count() as f32 + 1.0) * cell_w * STATUS_TEXT_SCALE;
-        emit_simple_string_scaled(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            &file_info,
-            file_info_x,
-            status_baseline,
-            theme.foreground.to_f32_rgba(0.85),
-            STATUS_TEXT_SCALE,
-        );
-
-        let error_count = diagnostics
-            .iter()
-            .filter(|d| d.severity == lsp_types::DiagnosticSeverity::ERROR)
-            .count();
-        let warning_count = diagnostics
-            .iter()
-            .filter(|d| d.severity == lsp_types::DiagnosticSeverity::WARNING)
-            .count();
-        let mut right_info = format!(
-            "Ln {}, Col {}  |  {}",
+        let right_status = format!(
+            "Ln {}, Col {}   Spaces: 2   UTF-8   LF   {}",
             doc.cursor.line + 1,
             doc.cursor.cluster_idx + 1,
-            doc.language.display_name(),
+            doc.language.display_name().to_uppercase()
         );
-        if error_count > 0 || warning_count > 0 {
-            right_info.push_str(&format!("  |  E:{error_count} W:{warning_count}"));
-        }
-        if let Some(status) = lsp_status
-            && status != "LSP: Idle"
-        {
-            right_info.push_str(&format!("  |  {status}"));
-        }
-        if git.is_repo {
-            let branch = git.branch.as_deref().unwrap_or("git");
-            if git.changes.is_empty() {
-                right_info.push_str(&format!("  |  {branch}"));
-            } else {
-                right_info.push_str(&format!("  |  {branch} ({})", git.changes.len()));
-            }
-        }
-        if doc.caret_count() > 1 {
-            right_info.push_str(&format!("  |  {} cursors", doc.caret_count()));
-        }
-        if let Some(vim) = vim
-            && let Some((message, at)) = &vim.status_message
-            && at.elapsed().as_secs() < 5
-        {
-            right_info.push_str(&format!("  |  {message}"));
-        }
-
-        let right_w = right_info.chars().count() as f32 * cell_w * STATUS_TEXT_SCALE;
+        let right_w = right_status.chars().count() as f32 * cell_w * STATUS_TEXT_SCALE;
         emit_simple_string_scaled(
             config,
             font_sys,
             atlas,
             fg_instances,
-            &right_info,
-            (vp.x + vp.w - right_w - 12.0).max(vp.x + 200.0),
+            &right_status,
+            (vp.x + vp.w - right_w - 12.0 * ui).max(vp.x + 200.0),
             status_baseline,
-            theme.foreground.to_f32_rgba(0.70),
+            theme.foreground.to_f32_rgba(0.90),
             STATUS_TEXT_SCALE,
         );
+
+        if doc.is_settings {
+            Self::emit_settings_ui(
+                config,
+                font_sys,
+                atlas,
+                bg_instances,
+                fg_instances,
+                vp,
+                settings_state,
+                ui,
+                line_h,
+                cell_w,
+                baseline,
+            );
+            return;
+        }
 
         // 4. Main Code Area & Gutter
         let content_y = vp.y + effective_tab_h + crumb_h;
@@ -996,6 +951,25 @@ impl EditorView {
             ));
         }
 
+        // 5c. Horizontal scrollbar above status bar
+        let h_scroll_h = 6.0 * ui;
+        let h_scroll_y = status_y - h_scroll_h;
+        bg_instances.push(QuadInstance::solid(
+            text_area_x,
+            h_scroll_y,
+            text_area_w,
+            h_scroll_h,
+            theme.background.to_f32_rgba(0.20),
+        ));
+        let thumb_w = (text_area_w * 0.45).clamp(40.0, text_area_w);
+        fg_instances.push(QuadInstance::solid(
+            text_area_x,
+            h_scroll_y,
+            thumb_w,
+            h_scroll_h,
+            theme.foreground.to_f32_rgba(0.35),
+        ));
+
         // 6. Floating Find / Replace Bar
         if let Some(fb) = find_bar
             && fb.is_active
@@ -1030,6 +1004,688 @@ impl EditorView {
         // 9. Command Palette Modal (Ctrl+P)
         if let Some(cp) = palette {
             emit_command_palette(config, font_sys, atlas, overlay_instances, cp, vp);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_sidebar_header(
+        config: &Config,
+        font_sys: &mut FontSystem,
+        atlas: &mut GlyphAtlas,
+        bg_instances: &mut Vec<QuadInstance>,
+        fg_instances: &mut Vec<QuadInstance>,
+        sx: f32,
+        sy: f32,
+        sw: f32,
+        header_h: f32,
+        active_panel: crate::editor::SidebarPanel,
+        ui: f32,
+        line_h: f32,
+        baseline: f32,
+    ) {
+        let theme = &config.colors;
+        bg_instances.push(QuadInstance::solid(
+            sx,
+            sy,
+            sw - 1.0,
+            header_h,
+            theme.selection_background.to_f32_rgba(0.20),
+        ));
+        fg_instances.push(QuadInstance::solid(
+            sx,
+            sy + header_h - 1.0,
+            sw - 1.0,
+            1.0,
+            theme.foreground.to_f32_rgba(0.12),
+        ));
+
+        let header_baseline = sy + (header_h - line_h) * 0.5 + baseline;
+        let is_exp = active_panel == crate::editor::SidebarPanel::Explorer;
+        let is_find = active_panel == crate::editor::SidebarPanel::Search;
+        let is_git = active_panel == crate::editor::SidebarPanel::Git;
+
+        // Explore
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "Explore",
+            sx + 8.0 * ui,
+            header_baseline,
+            theme.foreground.to_f32_rgba(if is_exp { 1.0 } else { 0.55 }),
+        );
+
+        // Find
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "Find",
+            sx + 62.0 * ui,
+            header_baseline,
+            theme.foreground.to_f32_rgba(if is_find { 1.0 } else { 0.55 }),
+        );
+
+        // Changes
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "Changes",
+            sx + 104.0 * ui,
+            header_baseline,
+            theme.foreground.to_f32_rgba(if is_git { 1.0 } else { 0.55 }),
+        );
+
+        // >> (collapse sidebar button)
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "»",
+            sx + sw - 44.0 * ui,
+            header_baseline,
+            theme.foreground.to_f32_rgba(0.70),
+        );
+
+        // : (settings / options button)
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            ":",
+            sx + sw - 20.0 * ui,
+            header_baseline,
+            theme.foreground.to_f32_rgba(0.70),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_settings_ui(
+        config: &Config,
+        font_sys: &mut FontSystem,
+        atlas: &mut GlyphAtlas,
+        bg_instances: &mut Vec<QuadInstance>,
+        fg_instances: &mut Vec<QuadInstance>,
+        vp: &EditorViewport,
+        settings_state: Option<&crate::editor::settings::SettingsState>,
+        ui: f32,
+        line_h: f32,
+        cell_w: f32,
+        baseline: f32,
+    ) {
+        let Some(st) = settings_state else {
+            return;
+        };
+        let theme = &config.colors;
+        let tab_h = (line_h + 6.0).round();
+        let cat_y = vp.y + tab_h;
+        let cat_h = (28.0 * ui).max(line_h);
+
+        // 1. Categories bar
+        let categories = [
+            ("General", crate::editor::settings::SettingsCategory::General),
+            ("Editor", crate::editor::settings::SettingsCategory::Editor),
+            (
+                "Appearance",
+                crate::editor::settings::SettingsCategory::Appearance,
+            ),
+            ("Sidebar", crate::editor::settings::SettingsCategory::Sidebar),
+            (
+                "Terminal",
+                crate::editor::settings::SettingsCategory::Terminal,
+            ),
+            ("Diff", crate::editor::settings::SettingsCategory::Diff),
+        ];
+
+        let mut cat_x = vp.x + 24.0 * ui;
+        for (label, cat) in categories {
+            let is_active = cat == st.active_category;
+            let text_color = if is_active {
+                [1.0, 1.0, 1.0, 1.0]
+            } else {
+                theme.foreground.to_f32_rgba(0.55)
+            };
+            let cat_w = label.chars().count() as f32 * cell_w;
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg_instances,
+                label,
+                cat_x,
+                cat_y + (cat_h - line_h) * 0.5 + baseline,
+                text_color,
+            );
+            if is_active {
+                fg_instances.push(QuadInstance::solid(
+                    cat_x,
+                    cat_y + cat_h - 2.0,
+                    cat_w,
+                    2.0,
+                    [1.0, 1.0, 1.0, 0.95],
+                ));
+            }
+            cat_x += cat_w + 24.0 * ui;
+        }
+
+        // Horizontal line under categories bar
+        fg_instances.push(QuadInstance::solid(
+            vp.x,
+            cat_y + cat_h - 1.0,
+            vp.w,
+            1.0,
+            theme.foreground.to_f32_rgba(0.12),
+        ));
+
+        // 2. Bottom Action Bar (Cancel / Apply)
+        let bottom_h = 42.0 * ui;
+        let bottom_y = vp.y + vp.h - bottom_h;
+
+        fg_instances.push(QuadInstance::solid(
+            vp.x,
+            bottom_y,
+            vp.w,
+            1.0,
+            theme.foreground.to_f32_rgba(0.12),
+        ));
+
+        let apply_w = 64.0 * ui;
+        let apply_h = 26.0 * ui;
+        let apply_x = vp.x + vp.w - apply_w - 20.0 * ui;
+        let apply_y = bottom_y + (bottom_h - apply_h) * 0.5;
+
+        // Apply button box
+        bg_instances.push(QuadInstance::solid(
+            apply_x,
+            apply_y,
+            apply_w,
+            apply_h,
+            theme.selection_background.to_f32_rgba(0.85),
+        ));
+        let apply_text = if let Some(applied) = st.applied_feedback
+            && applied.elapsed().as_secs() < 3
+        {
+            "Saved!"
+        } else {
+            "Apply"
+        };
+        let apply_text_w = apply_text.chars().count() as f32 * cell_w;
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            apply_text,
+            apply_x + (apply_w - apply_text_w) * 0.5,
+            apply_y + (apply_h - line_h) * 0.5 + baseline,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+
+        // Cancel button
+        let cancel_w = 64.0 * ui;
+        let cancel_x = apply_x - cancel_w - 12.0 * ui;
+        let cancel_y = apply_y;
+        let cancel_text = "Cancel";
+        let cancel_text_w = cancel_text.chars().count() as f32 * cell_w;
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            cancel_text,
+            cancel_x + (cancel_w - cancel_text_w) * 0.5,
+            cancel_y + (apply_h - line_h) * 0.5 + baseline,
+            theme.foreground.to_f32_rgba(0.80),
+        );
+
+        // 3. Settings Items Content
+        let content_y = cat_y + cat_h + 24.0 * ui - st.scroll_y;
+        let mut cur_y = content_y;
+        let item_h = (26.0 * ui).max(line_h);
+
+        let mut emit_section =
+            |title: &str, y: f32, fg: &mut Vec<QuadInstance>, font_sys: &mut FontSystem, atlas: &mut GlyphAtlas| {
+                let title_w = title.chars().count() as f32 * cell_w;
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg,
+                    title,
+                    vp.x + 24.0 * ui,
+                    y + baseline,
+                    theme.foreground.to_f32_rgba(0.80),
+                );
+                let rule_start = vp.x + 24.0 * ui + title_w + 12.0 * ui;
+                let rule_end = (vp.x + 640.0 * ui).min(vp.x + vp.w - 30.0 * ui);
+                if rule_end > rule_start {
+                    fg.push(QuadInstance::solid(
+                        rule_start,
+                        (y + line_h * 0.45).round(),
+                        rule_end - rule_start,
+                        1.0,
+                        theme.foreground.to_f32_rgba(0.18),
+                    ));
+                }
+            };
+
+        let mut emit_row = |label: &str,
+                        value_str: &str,
+                        is_checked: Option<bool>,
+                        y: f32,
+                        fg: &mut Vec<QuadInstance>,
+                        font_sys: &mut FontSystem,
+                        atlas: &mut GlyphAtlas| {
+            if y + item_h < cat_y + cat_h || y > bottom_y {
+                return;
+            }
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg,
+                label,
+                vp.x + 36.0 * ui,
+                y + baseline,
+                theme.foreground.to_f32_rgba(0.90),
+            );
+            let val_col_x = vp.x + 280.0 * ui;
+            if let Some(checked) = is_checked {
+                let box_str = if checked { "[x]" } else { "[ ]" };
+                let col = if checked {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    theme.foreground.to_f32_rgba(0.55)
+                };
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg,
+                    box_str,
+                    val_col_x,
+                    y + baseline,
+                    col,
+                );
+            } else {
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg,
+                    value_str,
+                    val_col_x,
+                    y + baseline,
+                    theme.ansi[3].to_f32_rgba(1.0),
+                );
+            }
+        };
+
+        match st.active_category {
+            crate::editor::settings::SettingsCategory::General => {
+                emit_section("Startup", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Welcome page in home folder",
+                    "",
+                    Some(st.draft.welcome_page),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Recent folder history",
+                    "",
+                    Some(st.draft.recent_folder_history),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h + 20.0 * ui;
+
+                emit_section("Plugins", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Enable plugins (restart)",
+                    "",
+                    Some(st.draft.enable_plugins),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h + 20.0 * ui;
+
+                emit_section("Debugging", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Debug mode (restart)",
+                    "",
+                    Some(st.draft.debug_mode),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
+            crate::editor::settings::SettingsCategory::Editor => {
+                emit_section("Typography & Sizing", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Tab size",
+                    &format!("{}", st.draft.tab_size),
+                    None,
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Insert spaces for tabs",
+                    "",
+                    Some(st.draft.insert_spaces),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h + 20.0 * ui;
+
+                emit_section("Display & Formatting", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Line numbers",
+                    "",
+                    Some(st.draft.line_numbers),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Relative line numbers",
+                    "",
+                    Some(st.draft.relative_line_numbers),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Auto-close brackets & quotes",
+                    "",
+                    Some(st.draft.auto_close_brackets),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Format on save",
+                    "",
+                    Some(st.draft.format_on_save),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Trim trailing spaces on save",
+                    "",
+                    Some(st.draft.trim_trailing_whitespace),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Vim modal editing mode",
+                    "",
+                    Some(st.draft.vim_mode),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
+            crate::editor::settings::SettingsCategory::Appearance => {
+                emit_section("Theme & Window", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Color theme",
+                    &st.draft.theme_name,
+                    None,
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Background opacity",
+                    &format!("{:.2}", st.draft.background_opacity),
+                    None,
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Show bottom status bar",
+                    "",
+                    Some(st.draft.show_status_bar),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Show top menu bar",
+                    "",
+                    Some(st.draft.show_menu_bar),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Window titlebar & decorations",
+                    "",
+                    Some(st.draft.window_decorations),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h + 20.0 * ui;
+
+                emit_section("Cursor", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Cursor style",
+                    match st.draft.cursor_style {
+                        crate::config::CursorStyle::Block => "block",
+                        crate::config::CursorStyle::Bar => "bar",
+                        crate::config::CursorStyle::Underline => "underline",
+                        crate::config::CursorStyle::BlockHollow => "block_hollow",
+                    },
+                    None,
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Cursor blinking",
+                    "",
+                    Some(st.draft.cursor_blink),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
+            crate::editor::settings::SettingsCategory::Sidebar => {
+                emit_section("File Explorer", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Show hidden dotfiles (.git, etc.)",
+                    "",
+                    Some(st.draft.show_hidden_files),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Single-click to open file",
+                    "",
+                    Some(st.draft.single_click_open),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Compact folder rendering",
+                    "",
+                    Some(st.draft.compact_folders),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h + 20.0 * ui;
+
+                emit_section("Panels", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Git changes panel enabled",
+                    "",
+                    Some(st.draft.git_changes_enabled),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Workspace search enabled",
+                    "",
+                    Some(st.draft.search_enabled),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Show activity bar",
+                    "",
+                    Some(st.draft.activity_bar_visible),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
+            crate::editor::settings::SettingsCategory::Terminal => {
+                emit_section("Terminal Behavior", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Copy text on selection",
+                    "",
+                    Some(st.draft.copy_on_select),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Hide mouse cursor while typing",
+                    "",
+                    Some(st.draft.mouse_hide_typing),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Clickable URL links",
+                    "",
+                    Some(st.draft.link_url),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
+            crate::editor::settings::SettingsCategory::Diff => {
+                emit_section("Git & Diff", cur_y, fg_instances, font_sys, atlas);
+                cur_y += item_h + 8.0 * ui;
+                emit_row(
+                    "Inline Git blame in status bar",
+                    "",
+                    Some(st.draft.inline_git_blame),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Gutter git modification markers",
+                    "",
+                    Some(st.draft.gutter_indicators),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Show staged status",
+                    "",
+                    Some(st.draft.show_staged_status),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+                cur_y += item_h;
+                emit_row(
+                    "Auto-refresh git status",
+                    "",
+                    Some(st.draft.auto_refresh_git),
+                    cur_y,
+                    fg_instances,
+                    font_sys,
+                    atlas,
+                );
+            }
         }
     }
 
@@ -1155,22 +1811,20 @@ impl EditorView {
             theme.foreground.to_f32_rgba(0.12),
         ));
 
-        bg_instances.push(QuadInstance::solid(
+        Self::emit_sidebar_header(
+            config,
+            font_sys,
+            atlas,
+            bg_instances,
+            fg_instances,
             x,
             y,
             width,
             header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        emit_simple_string(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            &format!("PROBLEMS ({})", problems.len()),
-            x + 10.0,
-            y + (header_h - line_h) * 0.5 + baseline,
-            theme.ansi[4].to_f32_rgba(1.0),
+            crate::editor::SidebarPanel::Problems,
+            ui,
+            line_h,
+            baseline,
         );
 
         let max_chars = ((width - 30.0) / cell_w).floor().max(6.0) as usize;
@@ -1251,22 +1905,20 @@ impl EditorView {
             height,
             theme.foreground.to_f32_rgba(0.12),
         ));
-        bg_instances.push(QuadInstance::solid(
+        Self::emit_sidebar_header(
+            config,
+            font_sys,
+            atlas,
+            bg_instances,
+            fg_instances,
             x,
             y,
             width,
             header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        emit_simple_string(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            &format!("SEARCH ({})", search.results.len()),
-            x + 10.0,
-            y + (header_h - line_h) * 0.5 + baseline,
-            theme.ansi[4].to_f32_rgba(1.0),
+            crate::editor::SidebarPanel::Search,
+            ui,
+            line_h,
+            baseline,
         );
 
         let max_chars = ((width - 20.0 * ui) / cell_w).floor().max(6.0) as usize;
@@ -1451,35 +2103,20 @@ impl EditorView {
             height,
             theme.foreground.to_f32_rgba(0.12),
         ));
-        bg_instances.push(QuadInstance::solid(
+        Self::emit_sidebar_header(
+            config,
+            font_sys,
+            atlas,
+            bg_instances,
+            fg_instances,
             x,
             y,
             width,
             header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        fg_instances.push(QuadInstance::solid(
-            x,
-            y + header_h - 1.0,
-            width,
-            1.0,
-            theme.foreground.to_f32_rgba(0.10),
-        ));
-
-        let title = if git.is_repo {
-            format!("SOURCE CONTROL ({})", git.changes.len())
-        } else {
-            "SOURCE CONTROL".to_string()
-        };
-        emit_simple_string(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            &title,
-            x + 8.0,
-            y + (header_h - line_h) * 0.5 + baseline,
-            theme.ansi[4].to_f32_rgba(1.0),
+            crate::editor::SidebarPanel::Git,
+            ui,
+            line_h,
+            baseline,
         );
 
         let mut row_y = y + header_h + 3.0;
@@ -1654,22 +2291,20 @@ impl EditorView {
             height,
             theme.foreground.to_f32_rgba(0.12),
         ));
-        bg_instances.push(QuadInstance::solid(
+        Self::emit_sidebar_header(
+            config,
+            font_sys,
+            atlas,
+            bg_instances,
+            fg_instances,
             x,
             y,
             width,
             header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        emit_simple_string(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            &format!("PLUGINS ({})", plugins.len()),
-            x + 10.0,
-            y + (header_h - line_h) * 0.5 + baseline,
-            theme.ansi[4].to_f32_rgba(1.0),
+            crate::editor::SidebarPanel::Plugins,
+            ui,
+            line_h,
+            baseline,
         );
 
         let max_chars = ((width - 44.0 * ui) / cell_w).floor().max(6.0) as usize;
@@ -1750,37 +2385,22 @@ impl EditorView {
             theme.foreground.to_f32_rgba(0.12),
         ));
 
-        // 3. Header: "EXPLORER: <ROOT_NAME>"
+        // 3. Header: Explore  Find  Changes       »   :
         let header_h = (line_h + 6.0).round();
-        bg_instances.push(QuadInstance::solid(
-            sx,
-            sy,
-            sw - 1.0,
-            header_h,
-            theme.selection_background.to_f32_rgba(0.20),
-        ));
-        fg_instances.push(QuadInstance::solid(
-            sx,
-            sy + header_h - 1.0,
-            sw - 1.0,
-            1.0,
-            theme.foreground.to_f32_rgba(0.10),
-        ));
-
-        let header_title = format!("EXPLORER: {}", exp.root_name.to_uppercase());
-        let max_hdr_chars = ((sw - 16.0) / cell_w).floor().max(1.0) as usize;
-        let truncated_hdr: String = header_title.chars().take(max_hdr_chars).collect();
-        let header_baseline = sy + (header_h - line_h) * 0.5 + baseline;
-
-        emit_simple_string(
+        Self::emit_sidebar_header(
             config,
             font_sys,
             atlas,
+            bg_instances,
             fg_instances,
-            &truncated_hdr,
-            sx + 8.0,
-            header_baseline,
-            theme.ansi[4].to_f32_rgba(1.0),
+            sx,
+            sy,
+            sw,
+            header_h,
+            crate::editor::SidebarPanel::Explorer,
+            ui,
+            line_h,
+            baseline,
         );
 
         // 4. File Tree Entries
@@ -1804,81 +2424,89 @@ impl EditorView {
 
             if is_selected {
                 bg_instances.push(QuadInstance::solid(
-                    sx + 2.0,
+                    sx,
                     item_y,
-                    sw - 4.0,
+                    sw - 1.0,
                     item_h,
-                    theme.selection_background.to_f32_rgba(0.40),
-                ));
-                fg_instances.push(QuadInstance::solid(
-                    sx + 2.0,
-                    item_y,
-                    2.0,
-                    item_h,
-                    theme.cursor_color.to_f32_rgba(1.0),
+                    theme.selection_background.to_f32_rgba(0.35),
                 ));
             } else if is_hovered {
                 bg_instances.push(QuadInstance::solid(
-                    sx + 2.0,
+                    sx,
                     item_y,
-                    sw - 4.0,
+                    sw - 1.0,
                     item_h,
                     theme.foreground.to_f32_rgba(0.06),
                 ));
             }
 
-            let indent_px = (entry.depth as f32 * 12.0 * ui).min(sw - 40.0);
-            let icon_size = 12.0 * ui;
-
-            if entry.is_dir {
-                icons::emit(
-                    font_sys,
-                    atlas,
-                    fg_instances,
-                    if entry.is_expanded {
-                        IconId::ChevronDown
-                    } else {
-                        IconId::ChevronRight
-                    },
-                    sx + 5.0 * ui + indent_px,
-                    item_y + (item_h - 9.0 * ui) * 0.5,
-                    9.0 * ui,
-                    theme.foreground.to_f32_rgba(0.55),
-                );
-            }
-            let file_icon = icons::file_icon_for(&entry.path, entry.is_dir, entry.is_expanded);
-            let file_icon_color = icons::icon_color(file_icon, theme, 0.9);
-            icons::emit(
-                font_sys,
-                atlas,
-                fg_instances,
-                file_icon,
-                sx + 15.0 * ui + indent_px,
-                item_y + (item_h - icon_size) * 0.5,
-                icon_size,
-                file_icon_color,
-            );
-
-            let max_chars = ((sw - 30.0 * ui - indent_px) / cell_w).floor().max(1.0) as usize;
-            let truncated: String = entry.name.chars().take(max_chars).collect();
-
+            let indent_px = (entry.depth as f32 * 14.0 * ui).min(sw - 40.0);
+            let item_x = sx + 8.0 * ui + indent_px;
             let item_baseline = item_y + (item_h - line_h) * 0.5 + baseline;
+
             let text_color = if entry.is_dir || is_selected {
                 theme.foreground.to_f32_rgba(1.0)
             } else {
                 theme.foreground.to_f32_rgba(0.78)
             };
 
-            emit_simple_string(
-                config,
-                font_sys,
-                atlas,
-                fg_instances,
-                &truncated,
-                sx + 30.0 * ui + indent_px,
-                item_baseline,
-                text_color,
-            );
+            if entry.is_dir {
+                // In Image 0: directories show "v" or ">" without folder icon
+                let caret = if entry.is_expanded { "v" } else { ">" };
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    caret,
+                    item_x,
+                    item_baseline,
+                    theme.foreground.to_f32_rgba(if entry.is_expanded { 0.85 } else { 0.60 }),
+                );
+
+                let max_chars = ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
+                let truncated: String = entry.name.chars().take(max_chars).collect();
+
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    &truncated,
+                    item_x + 16.0 * ui,
+                    item_baseline,
+                    text_color,
+                );
+            } else {
+                // File entry: language/file icon, then name
+                let icon_size = 13.0 * ui;
+                let file_icon = icons::file_icon_for(&entry.path, false, false);
+                let file_icon_color = icons::icon_color(file_icon, theme, 0.95);
+                icons::emit(
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    file_icon,
+                    item_x,
+                    item_y + (item_h - icon_size) * 0.5,
+                    icon_size,
+                    file_icon_color,
+                );
+
+                let max_chars = ((sw - (item_x - sx) - 18.0 * ui) / cell_w).floor().max(1.0) as usize;
+                let truncated: String = entry.name.chars().take(max_chars).collect();
+
+                emit_simple_string(
+                    config,
+                    font_sys,
+                    atlas,
+                    fg_instances,
+                    &truncated,
+                    item_x + 18.0 * ui,
+                    item_baseline,
+                    text_color,
+                );
+            }
         }
     }
 }

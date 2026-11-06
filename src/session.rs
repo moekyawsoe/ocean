@@ -88,6 +88,9 @@ pub fn save(editor: &EditorWorkspace, clean_exit: bool) -> Result<(), String> {
 
     let mut documents = Vec::with_capacity(editor.documents.len());
     for (index, document) in editor.documents.iter().enumerate() {
+        if document.is_settings {
+            continue;
+        }
         let mut backup = None;
         if !clean_exit && document.is_dirty() {
             let backup_name = format!("doc-{index}.bak");

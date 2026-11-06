@@ -25,6 +25,9 @@ pub enum MenuAction {
     GoToFile,
     ShowHelp,
     OpenConfig,
+    OpenSettings,
+    SelectAll,
+    SearchPanel,
     RecentFile(PathBuf),
 }
 
@@ -156,9 +159,18 @@ impl MenuBar {
                 ],
             },
             Menu {
+                title: "Selection",
+                entries: vec![
+                    entry("Select All", "Ctrl+A", MenuAction::SelectAll, true),
+                    entry("Expand Selection", "", MenuAction::SelectAll, false),
+                    entry("Shrink Selection", "", MenuAction::SelectAll, false),
+                ],
+            },
+            Menu {
                 title: "View",
                 entries: vec![
                     entry("Explorer", "Ctrl+B", MenuAction::ToggleExplorer, true),
+                    entry("Find in Files", "Ctrl+Shift+F", MenuAction::SearchPanel, true),
                     entry("Problems", "", MenuAction::ToggleProblems, true),
                     entry("Git Changes", "Ctrl+Shift+G", MenuAction::GitChanges, true),
                     entry("Show Git Diff", "", MenuAction::ShowGitDiff, true),
@@ -185,10 +197,10 @@ impl MenuBar {
                 ],
             },
             Menu {
-                title: "Go",
+                title: "Options",
                 entries: vec![
-                    entry("Go to File...", "Ctrl+P", MenuAction::GoToFile, true),
-                    entry("Go to Line...", "Ctrl+G", MenuAction::CommandPalette, false),
+                    entry("Settings", "Ctrl+,", MenuAction::OpenSettings, true),
+                    entry("Open Config File", "", MenuAction::OpenConfig, true),
                 ],
             },
             Menu {
@@ -200,7 +212,7 @@ impl MenuBar {
                         MenuAction::ShowHelp,
                         true,
                     ),
-                    entry("Edit Config", "", MenuAction::OpenConfig, true),
+                    entry("Documentation", "", MenuAction::ShowHelp, true),
                 ],
             },
         ];
