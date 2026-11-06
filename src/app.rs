@@ -24,7 +24,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
-use winit::keyboard::ModifiersState;
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 #[cfg(target_os = "linux")]
 use winit::platform::wayland::WindowAttributesExtWayland;
 #[cfg(target_os = "linux")]
@@ -38,6 +38,7 @@ use crate::confirm::{ConfirmChoice, ConfirmDialog, ConfirmLayout};
 use crate::font::FontSystem;
 use crate::help::{HelpClickOutcome, HelpDialog, HelpKeyOutcome};
 use crate::menu::{ContextMenu, MenuClickOutcome, MenuKeyOutcome};
+use crate::menubar::{MenuAction, MenuBar, MenuKeyOutcome as MenuBarKeyOutcome, MenuMouseOutcome};
 use crate::renderer::{GlRenderer, PaneScene, RenderEngine, TabTitle};
 use crate::split::{
     PaneLayout, SplitAxis, SplitDivider, SplitNode, compute_split_layout, find_neighbor_pane,
@@ -139,6 +140,7 @@ pub struct OceanApp {
     theme_before_preview: Option<String>,
     help_dialog: Option<HelpDialog>,
     confirm_dialog: Option<ConfirmDialog>,
+    menubar: MenuBar,
     available_update: Option<crate::update::UpdateInfo>,
     status_hover: StatusBarHover,
     dragging_divider: Option<DividerDragState>,
@@ -165,6 +167,7 @@ pub struct OceanApp {
     cursor_blink_on: bool,
     last_blink_toggle: Instant,
     last_config_poll: Instant,
+    last_autosave: Instant,
 }
 
 impl OceanApp {
@@ -188,6 +191,22 @@ impl OceanApp {
 
         let mut editor = crate::editor::EditorWorkspace::new();
         editor.vim.enabled = config.editor_keymap == crate::config::EditorKeymap::Vim;
+
+        let mut restored_session = false;
+        if config.restore_session
+            && !launch_opts.initial_editor_mode
+            && launch_opts.editor_file.is_none()
+            && let Some(session) = crate::session::load()
+        {
+            crate::session::restore_editor(
+                &mut editor,
+                &session,
+                proxy.clone(),
+                config.crash_recovery,
+            );
+            restored_session = true;
+        }
+
         if launch_opts.initial_editor_mode {
             editor.mode = crate::editor::WorkspaceMode::PureEditor;
             editor.editor_focused = true;
@@ -212,6 +231,12 @@ impl OceanApp {
                     .unwrap_or_else(|| std::path::Path::new("."));
                 editor.open_folder(folder);
             }
+        } else if restored_session {
+            if editor.workspace_dir.as_os_str().is_empty() {
+                if let Some(ref cwd) = launch_cwd {
+                    editor.open_folder(cwd);
+                }
+            }
         } else if let Some(ref cwd) = launch_cwd {
             editor.open_folder(cwd);
         } else {
@@ -219,6 +244,7 @@ impl OceanApp {
         }
 
         let ipc_socket = crate::ipc::start_listener(proxy.clone()).ok();
+        let menubar = MenuBar::build(editor.recent_files());
 
         Self {
             config,
@@ -240,6 +266,7 @@ impl OceanApp {
             theme_before_preview: None,
             help_dialog: None,
             confirm_dialog: None,
+            menubar,
             available_update: None,
             status_hover: StatusBarHover::default(),
             dragging_divider: None,
@@ -262,6 +289,7 @@ impl OceanApp {
             cursor_blink_on: true,
             last_blink_toggle: Instant::now(),
             last_config_poll: Instant::now(),
+            last_autosave: Instant::now(),
         }
     }
 
@@ -1530,6 +1558,104 @@ impl OceanApp {
         }
     }
 
+    fn open_menubar(&mut self, index: usize) {
+        self.menubar = MenuBar::build(self.editor.recent_files());
+        self.menubar.open_menu(index);
+        if !self.config.window_show_menu_bar {
+            self.config.window_show_menu_bar = true;
+            self.resize_all_tabs();
+        }
+        self.close_context_menu();
+        self.request_redraw();
+    }
+
+    fn execute_menu_action(&mut self, action: MenuAction, event_loop: &ActiveEventLoop) {
+        let workspace = if self.editor.workspace_dir.as_os_str().is_empty() {
+            self.inherited_cwd(false)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        } else {
+            self.editor.workspace_dir.clone()
+        };
+
+        match action {
+            MenuAction::NewFile => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.editor_focused = true;
+                self.editor.new_document();
+            }
+            MenuAction::OpenFile | MenuAction::GoToFile | MenuAction::CommandPalette => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.editor_focused = true;
+                self.editor.open_command_palette(&workspace);
+            }
+            MenuAction::SaveFile => {
+                if let Err(err) = self.editor.save_active_document() {
+                    eprintln!("ocean: {err}");
+                }
+            }
+            MenuAction::CloseFile => {
+                self.editor.request_close_active();
+                if self.editor.take_close_confirm() {
+                    self.open_close_document_confirm();
+                }
+            }
+            MenuAction::Quit => {
+                self.request_exit(event_loop);
+                return;
+            }
+            MenuAction::Undo => {
+                if let Some(font_sys) = &mut self.font_sys {
+                    self.editor.undo_active(font_sys);
+                }
+            }
+            MenuAction::Redo => {
+                if let Some(font_sys) = &mut self.font_sys {
+                    self.editor.redo_active(font_sys);
+                }
+            }
+            MenuAction::Find => {
+                self.editor.find_bar.open();
+            }
+            MenuAction::ToggleExplorer => {
+                self.editor.explorer.toggle_visible();
+            }
+            MenuAction::ToggleProblems => {
+                self.editor.active_panel = crate::editor::SidebarPanel::Problems;
+                self.editor.explorer.visible = true;
+            }
+            MenuAction::ToggleStatusBar => {
+                self.config.window_show_status_bar = !self.config.window_show_status_bar;
+                self.resize_all_tabs();
+            }
+            MenuAction::ToggleMenuBar => {
+                self.config.window_show_menu_bar = !self.config.window_show_menu_bar;
+                self.resize_all_tabs();
+            }
+            MenuAction::ToggleSplit => {
+                self.execute_action(Action::ToggleSplitMode, event_loop);
+            }
+            MenuAction::PureEditorMode => {
+                self.execute_action(Action::ToggleEditor, event_loop);
+            }
+            MenuAction::RecentFile(path) => {
+                self.editor.mode = crate::editor::WorkspaceMode::PureEditor;
+                self.editor.editor_focused = true;
+                let _ = self.editor.open_file(&path, self.proxy.clone());
+            }
+            MenuAction::ShowHelp => {
+                self.help_dialog = Some(HelpDialog::new());
+            }
+            MenuAction::OpenConfig => {
+                self.open_config_in_editor();
+            }
+        }
+
+        self.resize_all_tabs();
+        self.sync_window_title();
+        self.sync_ime_policy();
+        self.request_redraw();
+    }
+
     fn request_exit(&mut self, event_loop: &ActiveEventLoop) {
         self.close_context_menu();
         self.help_dialog = None;
@@ -1545,6 +1671,8 @@ impl OceanApp {
     }
 
     fn perform_exit(&mut self, event_loop: &ActiveEventLoop) {
+        let _ = crate::session::save(&self.editor, true);
+        crate::session::clear_backups();
         for tab in &self.tabs {
             tab.shutdown_all();
         }
@@ -1587,6 +1715,9 @@ impl OceanApp {
                 self.perform_exit(event_loop);
                 return;
             }
+            ConfirmChoice::ReplaceAll => {
+                self.editor.replace_all_search();
+            }
         }
         self.request_redraw();
     }
@@ -1621,6 +1752,12 @@ impl OceanApp {
             return;
         }
         let sf = gl_state.window.scale_factor();
+        self.editor.ui_scale = sf as f32;
+        self.editor.menu_height = if self.editor.is_active() && self.config.window_show_menu_bar {
+            MenuBar::height(font_sys.metrics.cell_height, sf as f32)
+        } else {
+            0.0
+        };
         let editor_exclusive = self.editor.mode == crate::editor::WorkspaceMode::PureEditor;
         let tab_h = if editor_exclusive {
             0.0
@@ -1684,7 +1821,7 @@ impl OceanApp {
                 let ed_tab_h = crate::editor::EditorWorkspace::editor_tab_height(line_h);
                 let crumb_h = self.editor.breadcrumb_height(line_h);
                 let activity_w = if self.editor.activity_bar_visible {
-                    44.0
+                    44.0 * self.editor.ui_scale
                 } else {
                     0.0
                 };
@@ -1710,7 +1847,7 @@ impl OceanApp {
                 };
                 let code_x = ed_viewport.x + activity_w + sidebar_w;
                 let abs_cx = (code_x + rel_cx).round().max(0.0) as u32;
-                let abs_cy = (ed_viewport.y + ed_tab_h + crumb_h + rel_cy)
+                let abs_cy = (ed_viewport.y + self.editor.menu_height + ed_tab_h + crumb_h + rel_cy)
                     .round()
                     .max(0.0) as u32;
                 active_ime_px = Some((abs_cx, abs_cy));
@@ -1765,6 +1902,7 @@ impl OceanApp {
             true
         };
 
+        let editor_menu_h = self.editor.menu_height;
         let ed_ref = if self.editor.is_active() {
             Some(&mut self.editor)
         } else {
@@ -1798,6 +1936,8 @@ impl OceanApp {
             self.ime_preedit.as_deref(),
             editor_exclusive,
             self.confirm_dialog.as_ref(),
+            Some(&self.menubar),
+            editor_menu_h,
         );
 
         gl_state.renderer.draw(
@@ -1831,6 +1971,14 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             self.last_config_poll = Instant::now();
             if self.config.check_modified() {
                 self.reload_configuration();
+            }
+        }
+
+        let interval = self.config.autosave_interval_secs as u64;
+        if interval > 0 && self.last_autosave.elapsed() >= Duration::from_secs(interval) {
+            self.last_autosave = Instant::now();
+            if let Err(err) = crate::session::save(&self.editor, false) {
+                eprintln!("ocean session autosave: {err}");
             }
         }
     }
@@ -1969,6 +2117,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     self.close_context_menu();
                     self.dragging_divider = None;
                     self.mouse_left_down = false;
+                    let _ = crate::session::save(&self.editor, false);
                 }
                 if let Some(gl_state) = &self.gl_state {
                     gl_state.window.set_ime_allowed(true);
@@ -2053,6 +2202,25 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     } else {
                         self.request_redraw();
                     }
+                    return;
+                }
+
+                if self.menubar.is_open() {
+                    if matches!(event.logical_key, Key::Named(NamedKey::F10)) {
+                        self.menubar.close();
+                        self.request_redraw();
+                        return;
+                    }
+                    let outcome = self.menubar.handle_key(&event.logical_key);
+                    if let MenuBarKeyOutcome::Execute(action) = outcome {
+                        self.execute_menu_action(action, event_loop);
+                    }
+                    self.request_redraw();
+                    return;
+                }
+                if matches!(event.logical_key, Key::Named(NamedKey::F10)) && self.editor.is_active()
+                {
+                    self.open_menubar(0);
                     return;
                 }
 
@@ -2193,6 +2361,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             if self.editor.take_close_confirm() {
                                 self.open_close_document_confirm();
                             }
+                            if let Some(count) = self.editor.take_replace_all_request() {
+                                self.confirm_dialog = Some(ConfirmDialog::replace_all(count));
+                            }
                             self.reset_cursor_blink();
                             self.sync_ime_policy();
                             self.request_redraw();
@@ -2248,6 +2419,70 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                 self.set_mouse_hidden(false);
                 let px = position.x as f32;
                 let py = position.y as f32;
+
+                if self.editor.is_active() && self.editor.menu_height > 0.0 {
+                    let win_w = self
+                        .gl_state
+                        .as_ref()
+                        .map(|gl| gl.window.inner_size().width as f32)
+                        .unwrap_or(800.0);
+                    let win_h = self
+                        .gl_state
+                        .as_ref()
+                        .map(|gl| gl.window.inner_size().height as f32)
+                        .unwrap_or(600.0);
+                    let sf = self
+                        .gl_state
+                        .as_ref()
+                        .map(|gl| gl.window.scale_factor() as f32)
+                        .unwrap_or(1.0);
+                    let status_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
+                        .unwrap_or(0.0);
+                    let tab_h = self
+                        .font_sys
+                        .as_ref()
+                        .map(|fs| RenderEngine::tab_bar_height(&self.config, fs, self.tabs.len()))
+                        .unwrap_or(0.0);
+                    let effective_tab_h =
+                        if self.editor.mode == crate::editor::WorkspaceMode::PureEditor {
+                            0.0
+                        } else {
+                            tab_h
+                        };
+                    let (ed_vp, _, _) =
+                        self.editor
+                            .compute_layout(win_w, win_h, effective_tab_h, status_h);
+                    let layout = self.font_sys.as_ref().map(|font_sys| {
+                        self.menubar.layout(
+                            ed_vp.x,
+                            ed_vp.y,
+                            ed_vp.w,
+                            font_sys.metrics.cell_width,
+                            font_sys.metrics.cell_height,
+                            sf,
+                        )
+                    });
+                    if let Some(layout) = layout {
+                        let in_bar = py >= ed_vp.y && py <= ed_vp.y + self.editor.menu_height;
+                        let in_dropdown = layout
+                            .dropdown
+                            .map(|panel| {
+                                px >= panel.x
+                                    && px <= panel.x + panel.w
+                                    && py >= panel.y
+                                    && py <= panel.y + panel.h
+                            })
+                            .unwrap_or(false);
+                        if in_bar || in_dropdown {
+                            self.menubar.handle_mouse(&layout, px, py, false);
+                            self.request_redraw();
+                            return;
+                        }
+                    }
+                }
 
                 // Interactive hover on Neovim-style bottom shortcut bar
                 if self.dragging_divider.is_none()
@@ -2442,7 +2677,15 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         .as_ref()
                         .map(|fs| RenderEngine::status_bar_height(&self.config, fs, 1.0))
                         .unwrap_or(0.0);
-                    let (ed_vp, _, _) = self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+                    let effective_tab_h =
+                        if self.editor.mode == crate::editor::WorkspaceMode::PureEditor {
+                            0.0
+                        } else {
+                            tab_h
+                        };
+                    let (ed_vp, _, _) =
+                        self.editor
+                            .compute_layout(win_w, win_h, effective_tab_h, status_h);
 
                     if self.editor.dragging_scrollbar {
                         if let Some(font_sys) = &mut self.font_sys {
@@ -2946,8 +3189,15 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         .as_ref()
                         .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
                         .unwrap_or(0.0);
+                    let effective_tab_h =
+                        if self.editor.mode == crate::editor::WorkspaceMode::PureEditor {
+                            0.0
+                        } else {
+                            tab_h
+                        };
                     let (ed_vp, split_div, _) =
-                        self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+                        self.editor
+                            .compute_layout(win_w, win_h, effective_tab_h, status_h);
 
                     // Check click on editor/terminal split divider in Split mode
                     if let Some((sx, sy, sw, sh)) = split_div {
@@ -2961,6 +3211,46 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         {
                             self.editor.dragging_split_divider = true;
                             return;
+                        }
+                    }
+
+                    if self.editor.menu_height > 0.0 {
+                        let layout = self.font_sys.as_ref().map(|font_sys| {
+                            self.menubar.layout(
+                                ed_vp.x,
+                                ed_vp.y,
+                                ed_vp.w,
+                                font_sys.metrics.cell_width,
+                                font_sys.metrics.cell_height,
+                                sf,
+                            )
+                        });
+                        if let Some(layout) = layout {
+                            let in_bar = py >= ed_vp.y && py <= ed_vp.y + self.editor.menu_height;
+                            let in_dropdown = layout
+                                .dropdown
+                                .map(|panel| {
+                                    px >= panel.x
+                                        && px <= panel.x + panel.w
+                                        && py >= panel.y
+                                        && py <= panel.y + panel.h
+                                })
+                                .unwrap_or(false);
+                            if in_bar || in_dropdown {
+                                if state == ElementState::Pressed && button == MouseButton::Left {
+                                    let outcome = self.menubar.handle_mouse(&layout, px, py, true);
+                                    if let MenuMouseOutcome::Execute(action) = outcome {
+                                        self.execute_menu_action(action, event_loop);
+                                    }
+                                }
+                                self.request_redraw();
+                                return;
+                            }
+                            if self.menubar.is_open() && state == ElementState::Pressed {
+                                self.menubar.close();
+                                self.request_redraw();
+                                return;
+                            }
                         }
                     }
 
@@ -2991,6 +3281,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             }
                             if self.editor.take_close_confirm() {
                                 self.open_close_document_confirm();
+                            }
+                            if let Some(count) = self.editor.take_replace_all_request() {
+                                self.confirm_dialog = Some(ConfirmDialog::replace_all(count));
                             }
                             self.reset_cursor_blink();
                             self.request_redraw();
@@ -3182,7 +3475,15 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         .as_ref()
                         .map(|fs| RenderEngine::status_bar_height(&self.config, fs, sf as f64))
                         .unwrap_or(0.0);
-                    let (ed_vp, _, _) = self.editor.compute_layout(win_w, win_h, tab_h, status_h);
+                    let effective_tab_h =
+                        if self.editor.mode == crate::editor::WorkspaceMode::PureEditor {
+                            0.0
+                        } else {
+                            tab_h
+                        };
+                    let (ed_vp, _, _) =
+                        self.editor
+                            .compute_layout(win_w, win_h, effective_tab_h, status_h);
                     if px >= ed_vp.x
                         && px <= ed_vp.x + ed_vp.w
                         && py >= ed_vp.y
@@ -3283,7 +3584,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             }
             WindowEvent::Occluded(occluded) => {
                 self.occluded = occluded;
-                if !occluded {
+                if occluded {
+                    let _ = crate::session::save(&self.editor, false);
+                } else {
                     self.reset_cursor_blink();
                     self.request_redraw();
                 }
@@ -3296,8 +3599,16 @@ impl ApplicationHandler<AppEvent> for OceanApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let mut next: Option<Instant> = None;
         if self.config.cursor_blink && self.focused && !self.occluded {
-            let next = self.last_blink_toggle + Duration::from_millis(530);
+            next = Some(self.last_blink_toggle + Duration::from_millis(530));
+        }
+        let interval = self.config.autosave_interval_secs as u64;
+        if interval > 0 {
+            let due = self.last_autosave + Duration::from_secs(interval);
+            next = Some(next.map_or(due, |current| current.min(due)));
+        }
+        if let Some(next) = next {
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);

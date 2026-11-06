@@ -66,6 +66,10 @@ cargo build --release
   - **Switches the current window, not a new one**: Running `edit [path]` inside an Ocean shell sends a local IPC request to the owning window and switches that pane's window into editor mode. When invoked from outside Ocean, it reuses the most recently active Ocean window if one is running; otherwise it opens a normal editor window.
   - **Unsaved-work protection**: Closing a dirty document, closing the last tab/pane, quitting the app, or pressing the window close button opens a Save / Discard / Cancel confirmation dialog. `:q`, `:wq`, `Ctrl+W`, tab close buttons, and the palette all share the same protection. `:q!` and explicit Discard remain the only ways to drop work.
   - **Compact status bar**: The bottom Neovim-style status bar renders at 80% of the terminal font size by default, keeping shortcut chips readable without dominating the window.
+  - **Theme-aware icon system**: Embedded 1×/2× PNG icons are packed into the existing GPU glyph atlas, so activity-bar, file-type, tab, chevron, severity, and toolbar icons stay crisp and tinted by the active theme without adding a second draw call.
+  - **Top menu bar & recent files**: `File / Edit / View / Go / Help` menus (F10 or mouse) with recent files, quick open, find, view toggles, and editor/terminal split actions.
+  - **Plugin manager**: Plugin manifests and registry, local/URL installation with SHA-256 verification, enable/disable, uninstall, update, checksum verification, and a Plugins sidebar panel. CLI: `ocean +plugin-list`, `+plugin-install`, `+plugin-remove`, `+plugin-enable`, `+plugin-disable`, `+plugin-info`, `+plugin-verify`, `+plugin-update`.
+  - **Session restore & crash recovery**: Open documents, cursor/scroll positions, editor mode, and workspace are restored on launch. Dirty/untitled buffers are snapshotted every 15 seconds to `$XDG_STATE_HOME/ocean/backups/` and recovered after a crash; clean exits clear the backups.
   - **Interactive File Explorer Sidebar (`Ctrl+B`)**: Displays the active workspace folder tree with expandable directories and clickable files. Single-click opens any file immediately; click or drag divider to resize; toggle anytime with `Ctrl+B`.
   - **Native OpenGL Pipeline**: Renders directly on Ocean's instanced Glow/OpenGL quad renderer and Winit event loop — no external TUI abstractions (`crossterm`/`ratatui`) required.
   - **First-Class Myanmar Unicode Shaping**: Complex syllables with Virama (`U+1039`), Kinzi (`U+1004 U+103A U+1039`), medials (`U+103B..U+103E`), and combining vowels are unified into grapheme clusters and shaped with `rustybuzz`. Cursor movement locks to composite visual boundaries; backspace/delete removes composite clusters atomically without leaving orphaned diacritics or dotted circles.
@@ -196,6 +200,7 @@ keybind = ctrl+backslash=toggle_split_mode
 | `Ctrl+B` | Toggle File Explorer Sidebar (show / hide project folder tree) |
 | `Ctrl+S` | Save current document buffer to disk |
 | `Ctrl+P` | Open Command Palette / Fuzzy File Finder (powered by `nucleo-matcher`) |
+| `Ctrl+Shift+F` | Open the workspace Search panel (results respect `.gitignore`) |
 | `Ctrl+F` | Open in-buffer Find Bar (`Enter` / `Shift+Enter` cycles matches, `Esc` dismisses) |
 | `Ctrl+Space` | Trigger asynchronous LSP autocompletion popup (`Up`/`Down` navigates, `Enter`/`Tab` completes) |
 | `Ctrl+K` | Show hover documentation popup for symbol under cursor |
@@ -203,8 +208,22 @@ keybind = ctrl+backslash=toggle_split_mode
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo previously undone edit |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / Cut selection / Paste from clipboard |
 | `Ctrl+W` | Close current document tab |
+| `Alt+Click` | Add an additional cursor at the clicked position |
+| `Ctrl+Alt+Up` / `Ctrl+Alt+Down` | Add a cursor on the line above / below |
+| `Esc` | Clear additional cursors (or dismiss the active popup) |
 | `Mouse Drag on Divider` | Resize Split Mode B (Editor top ratio vs Terminal bottom ratio) |
 | `Mouse Click & Drag` | Precise cluster-aware text selection |
+
+#### Workspace Search & Multi-Cursor
+
+`Ctrl+Shift+F` (or the Search icon in the activity bar) opens a workspace-wide search panel. Type a query and press
+`Enter`; `Tab` switches to the replace field, and `Ctrl+Enter` asks for confirmation before replacing every match.
+Search is case-insensitive by default; click `Aa` for case-sensitive and `W` for whole-word matching. Results are
+grouped as clickable `file:line` rows and honor `.gitignore`.
+
+Multi-cursor editing works in the modeless keymap: `Alt+Click` adds a cursor, `Ctrl+Alt+Up`/`Ctrl+Alt+Down` add one
+per line, and typing, `Backspace`, `Delete`, paste, and arrow movement apply to every cursor. `Esc` collapses back to
+the primary cursor. The status bar reports the active cursor count.
 
 ### Optional Vim Keybindings
 
@@ -227,6 +246,17 @@ Set `editor-keymap = vim` in `~/.config/ocean/config` (live-reloads with `Ctrl+S
 | `v` … `d/y/c`, `V` … `d/y/c` | Visual char/line operations |
 | `/`, `n`, `N` | Search using the find bar |
 | `:` + `w/q/wq/q!/<line>` | Save, close, or jump to a line |
+
+### Session & Recovery Configuration
+
+```ini
+window-show-menu-bar = true
+restore-session = true
+crash-recovery = true
+autosave-interval = 15
+```
+
+Session snapshots live in `$XDG_STATE_HOME/ocean/session.json` (fallback `~/.local/state/ocean`).
 
 ### Language Server Setup (optional)
 

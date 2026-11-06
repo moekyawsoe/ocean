@@ -6,7 +6,10 @@ mod font;
 mod help;
 mod ipc;
 mod menu;
+mod menubar;
+mod plugins;
 mod renderer;
+mod session;
 mod split;
 mod statusbar;
 mod terminal;
@@ -36,6 +39,7 @@ pub struct ParsedCli {
     pub screenshot_out: Option<PathBuf>,
     pub screenshot_preset: Option<String>,
     pub plus_action: Option<String>,
+    pub plus_args: Vec<String>,
     pub force_flag: bool,
     pub backend: Option<String>,
     pub cli_overrides: Vec<(String, String)>,
@@ -52,6 +56,7 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
     let mut screenshot_out: Option<PathBuf> = None;
     let mut screenshot_preset: Option<String> = None;
     let mut plus_action: Option<String> = None;
+    let mut plus_args: Vec<String> = Vec::new();
     let mut force_flag = false;
     let mut backend: Option<String> = None;
     let mut cli_overrides: Vec<(String, String)> = Vec::new();
@@ -139,6 +144,16 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
             }
             s if s.starts_with('+') => {
                 plus_action = Some(s.to_string());
+                let mut next = i + 1;
+                while next < args.len()
+                    && !args[next].starts_with('+')
+                    && !args[next].starts_with("--")
+                {
+                    plus_args.push(args[next].clone());
+                    next += 1;
+                }
+                i = next;
+                continue;
             }
             s if s.starts_with("--") => {
                 let kv = &s[2..];
@@ -187,6 +202,7 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
         screenshot_out,
         screenshot_preset,
         plus_action,
+        plus_args,
         force_flag,
         backend,
         cli_overrides,
@@ -217,7 +233,7 @@ fn main() {
     }
 
     if let Some(act) = cli.plus_action {
-        run_plus_action(&act, &config, cli.force_flag);
+        run_plus_action(&act, &config, cli.force_flag, &cli.plus_args);
         return;
     }
 
@@ -303,7 +319,7 @@ fn main() {
     }
 }
 
-fn run_plus_action(act: &str, config: &Config, force: bool) {
+fn run_plus_action(act: &str, config: &Config, force: bool, args: &[String]) {
     match act {
         "+list-themes" => {
             println!(
@@ -510,6 +526,148 @@ fn run_plus_action(act: &str, config: &Config, force: bool) {
                 }
             }
         }
+        "+plugins-dir" => match crate::plugins::plugins_dir() {
+            Some(path) => println!("{}", path.display()),
+            None => {
+                eprintln!("Could not resolve the Ocean plugins directory.");
+                std::process::exit(1);
+            }
+        },
+        "+plugin-list" => {
+            let plugins = crate::plugins::list();
+            if plugins.is_empty() {
+                println!("No plugins installed.");
+            } else {
+                for plugin in plugins {
+                    let version = if plugin.version.is_empty() {
+                        "0.0.0"
+                    } else {
+                        plugin.version.as_str()
+                    };
+                    println!(
+                        "{}  v{}  [{}]  {}",
+                        plugin.name,
+                        version,
+                        if plugin.enabled { "on" } else { "off" },
+                        plugin.path.display()
+                    );
+                    if !plugin.description.is_empty() {
+                        println!("    {}", plugin.description);
+                    }
+                }
+            }
+        }
+        "+plugin-install" => {
+            let Some(source) = args.first() else {
+                eprintln!("Usage: ocean +plugin-install <file.wasm|https://...> [--force]");
+                std::process::exit(1);
+            };
+            let result = if source.starts_with("http://") || source.starts_with("https://") {
+                crate::plugins::install_url(source, force)
+            } else {
+                crate::plugins::install_local(Path::new(source), force, None)
+            };
+            match result {
+                Ok(plugin) => println!(
+                    "Installed {} v{} (sha256 {})",
+                    plugin.name, plugin.version, plugin.sha256
+                ),
+                Err(err) => {
+                    eprintln!("Plugin install failed: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "+plugin-remove" => {
+            let Some(id) = args.first() else {
+                eprintln!("Usage: ocean +plugin-remove <id> [--force]");
+                std::process::exit(1);
+            };
+            if let Err(err) = crate::plugins::remove(id, force) {
+                eprintln!("Plugin remove failed: {err}");
+                std::process::exit(1);
+            }
+            println!("Removed plugin `{id}`.");
+        }
+        "+plugin-enable" | "+plugin-disable" => {
+            let Some(id) = args.first() else {
+                eprintln!("Usage: ocean +plugin-enable|+plugin-disable <id>");
+                std::process::exit(1);
+            };
+            let enabled = act == "+plugin-enable";
+            if let Err(err) = crate::plugins::set_enabled(id, enabled) {
+                eprintln!("Plugin update failed: {err}");
+                std::process::exit(1);
+            }
+            println!(
+                "Plugin `{id}` {}.",
+                if enabled { "enabled" } else { "disabled" }
+            );
+        }
+        "+plugin-info" => {
+            let Some(id) = args.first() else {
+                eprintln!("Usage: ocean +plugin-info <id>");
+                std::process::exit(1);
+            };
+            match crate::plugins::load_manifest(id) {
+                Some(manifest) => {
+                    println!("id          = {}", manifest.id);
+                    println!("name        = {}", manifest.name);
+                    println!("version     = {}", manifest.version);
+                    println!("description = {}", manifest.description);
+                    println!("entry       = {}", manifest.entry);
+                    println!("sha256      = {}", manifest.sha256);
+                    println!("source      = {}", manifest.source);
+                }
+                None => {
+                    eprintln!("No manifest found for plugin `{id}`.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "+plugin-verify" => {
+            let Some(id) = args.first() else {
+                eprintln!("Usage: ocean +plugin-verify <id>");
+                std::process::exit(1);
+            };
+            match crate::plugins::verify(id) {
+                Ok(true) => println!("Plugin `{id}` checksum OK."),
+                Ok(false) => {
+                    eprintln!("Plugin `{id}` checksum MISMATCH.");
+                    std::process::exit(1);
+                }
+                Err(err) => {
+                    eprintln!("Plugin verify failed: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "+plugin-update" => {
+            let Some(id) = args.first() else {
+                eprintln!("Usage: ocean +plugin-update <id>");
+                std::process::exit(1);
+            };
+            let Some(manifest) = crate::plugins::load_manifest(id) else {
+                eprintln!("No manifest found for plugin `{id}`.");
+                std::process::exit(1);
+            };
+            let result = if manifest.source.starts_with("http://")
+                || manifest.source.starts_with("https://")
+            {
+                crate::plugins::install_url(&manifest.source, true)
+            } else if !manifest.source.is_empty() {
+                crate::plugins::install_local(Path::new(&manifest.source), true, None)
+            } else {
+                Err("Plugin has no recorded install source".to_string())
+            };
+            match result {
+                Ok(plugin) => println!("Updated {} v{}.", plugin.name, plugin.version),
+                Err(err) => {
+                    eprintln!("Plugin update failed: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         other => {
             eprintln!("Unknown action `{other}`. Run `ocean --help` for usage.");
             std::process::exit(1);
@@ -666,6 +824,8 @@ fn run_screenshot(
             None,
             false,
             None,
+            None,
+            0.0,
         );
 
         return save_scene_png(
@@ -746,6 +906,8 @@ fn run_screenshot(
         None,
         false,
         None,
+        None,
+        0.0,
     );
 
     save_scene_png(
@@ -860,6 +1022,15 @@ ACTIONS (Ghostty-style):
     +list-fonts                    List discovered Monospace and Myanmar/Burmese fonts
     +list-themes                   List built-in color themes
     +myanmar-check                 Verify OpenType Myanmar shaping on system fonts
+    +plugins-dir                   Print the installed plugin directory
+    +plugin-list                   List installed WASM plugins and enabled state
+    +plugin-install <path|url>     Install a .wasm plugin from disk or HTTPS URL (--force)
+    +plugin-remove <id>            Remove an installed plugin (--force if enabled)
+    +plugin-enable <id>            Enable a plugin
+    +plugin-disable <id>           Disable a plugin without removing it
+    +plugin-info <id>              Show the plugin manifest
+    +plugin-verify <id>            Verify the plugin checksum
+    +plugin-update <id>            Reinstall from the recorded source
     +check-update                  Check online if a newer release of Ocean is available
     +update                        Download and upgrade Ocean to latest tagged release",
         crate::update::running_version()

@@ -6,6 +6,7 @@ pub enum ConfirmChoice {
     SaveAll,
     Discard,
     DiscardAll,
+    ReplaceAll,
     Cancel,
 }
 
@@ -16,6 +17,7 @@ impl ConfirmChoice {
             Self::SaveAll => "Save All",
             Self::Discard => "Discard",
             Self::DiscardAll => "Discard All",
+            Self::ReplaceAll => "Replace All",
             Self::Cancel => "Cancel",
         }
     }
@@ -62,6 +64,20 @@ impl ConfirmDialog {
             },
             files,
             choices,
+            selected: 0,
+            error: None,
+        }
+    }
+
+    pub fn replace_all(count: usize) -> Self {
+        Self {
+            title: "Replace all matches".to_string(),
+            message: format!(
+                "Replace {count} occurrence{} in the workspace? This writes files to disk.",
+                if count == 1 { "" } else { "s" }
+            ),
+            files: Vec::new(),
+            choices: vec![ConfirmChoice::ReplaceAll, ConfirmChoice::Cancel],
             selected: 0,
             error: None,
         }
@@ -145,6 +161,11 @@ impl ConfirmDialog {
                         }
                         if self.choices.contains(&ConfirmChoice::DiscardAll) {
                             return Some(ConfirmChoice::DiscardAll);
+                        }
+                    }
+                    "r" => {
+                        if self.choices.contains(&ConfirmChoice::ReplaceAll) {
+                            return Some(ConfirmChoice::ReplaceAll);
                         }
                     }
                     "c" => return Some(ConfirmChoice::Cancel),

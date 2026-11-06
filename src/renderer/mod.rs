@@ -1,5 +1,6 @@
 pub mod atlas;
 pub mod box_drawing;
+pub mod icons;
 
 use std::cell::Cell;
 use std::fs::File;
@@ -17,6 +18,7 @@ use crate::font::shaper::{CellInput, PositionedGlyph, TextShaper};
 use crate::font::{FontStyle, FontSystem};
 use crate::help::{HelpDialog, SECTION_TITLES, StyledLine};
 use crate::menu::{ContextMenu, MenuEntry, ThemeSubEntry};
+use crate::menubar::MenuBar;
 use crate::split::{PaneLayout, SplitDivider};
 use crate::statusbar::{
     STATUS_BAR_TEXT_SCALE, STATUS_BAR_VERTICAL_PAD, StatusBarContext, StatusBarGeometry, StatusMode,
@@ -221,6 +223,8 @@ impl RenderEngine {
         editor_preedit: Option<&str>,
         editor_exclusive: bool,
         confirm_dialog: Option<&ConfirmDialog>,
+        menu_bar: Option<&MenuBar>,
+        editor_menu_h: f32,
     ) -> (&mut GlyphAtlas, &[QuadInstance]) {
         self.bg_instances.clear();
         self.fg_instances.clear();
@@ -267,6 +271,14 @@ impl RenderEngine {
                 cursor_visible_blink,
                 editor_preedit,
             );
+        }
+
+        // Editor menu bar (drawn after the editor body so its dropdown overlays).
+        if editor_menu_h > 0.0
+            && let Some(bar) = menu_bar
+            && let Some(vp) = editor_vp
+        {
+            self.emit_menu_bar(config, font_sys, bar, &vp, editor_menu_h, scale_factor);
         }
 
         // Workspace split divider between Editor and Terminal
@@ -758,26 +770,216 @@ impl RenderEngine {
             );
         }
 
-        // Crisp `+` New Tab button right after the tabs
+        // Crisp icon-based `+` New Tab button right after the tabs
         if plus_x + plus_w <= win_w {
-            let cx = (plus_x + plus_w * 0.5).floor();
-            let cy = ((tab_h - 1.0) * 0.5).floor();
-            let arm = (tab_h * 0.22).round().clamp(4.0, 7.0);
+            let icon = (tab_h * 0.42).round().clamp(10.0, 16.0);
+            let cx = (plus_x + plus_w * 0.5 - icon * 0.5).floor();
+            let cy = ((tab_h - icon) * 0.5).floor();
             let plus_col = config.colors.foreground.to_f32_rgba(0.62);
-            self.fg_instances.push(QuadInstance::solid(
-                cx - arm,
-                cy,
-                arm * 2.0 + 1.0,
-                1.5,
-                plus_col,
-            ));
-            self.fg_instances.push(QuadInstance::solid(
+            crate::renderer::icons::emit(
+                &mut self.atlas,
+                &mut self.fg_instances,
+                crate::renderer::icons::IconId::Plus,
                 cx,
-                cy - arm,
-                1.5,
-                arm * 2.0 + 1.0,
+                cy,
+                icon,
                 plus_col,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_menu_bar(
+        &mut self,
+        config: &Config,
+        font_sys: &mut FontSystem,
+        menubar: &MenuBar,
+        vp: &crate::editor::view::EditorViewport,
+        menu_h: f32,
+        scale_factor: f64,
+    ) {
+        let cw = font_sys.metrics.cell_width;
+        let ch = font_sys.metrics.cell_height;
+        let baseline = font_sys.metrics.baseline;
+        let sf = scale_factor.max(0.5) as f32;
+        let layout = menubar.layout(vp.x, vp.y, vp.w, cw, ch, sf);
+        let bg = config.colors.background;
+        let fg = config.colors.foreground;
+        let is_dark = bg.relative_luminance() < 0.35;
+        let bar_bg = if is_dark {
+            Rgb::new(
+                bg.r.saturating_add(8),
+                bg.g.saturating_add(11),
+                bg.b.saturating_add(16),
+            )
+        } else {
+            Rgb::new(
+                bg.r.saturating_sub(12),
+                bg.g.saturating_sub(10),
+                bg.b.saturating_sub(8),
+            )
+        };
+
+        self.bg_instances.push(QuadInstance::solid(
+            layout.bar.x,
+            layout.bar.y,
+            layout.bar.w,
+            menu_h,
+            bar_bg.to_f32_rgba(0.99),
+        ));
+        self.fg_instances.push(QuadInstance::solid(
+            layout.bar.x,
+            layout.bar.y + menu_h - 1.0,
+            layout.bar.w,
+            1.0,
+            fg.to_f32_rgba(0.14),
+        ));
+
+        let pad = (12.0 * sf).round();
+        let title_baseline = layout.bar.y + (menu_h - ch) * 0.5 + baseline;
+        for (index, rect) in &layout.titles {
+            let active = menubar.open == Some(*index) || menubar.hovered_title == Some(*index);
+            if active {
+                self.bg_instances.push(QuadInstance::solid(
+                    rect.x,
+                    rect.y + 2.0 * sf,
+                    rect.w,
+                    menu_h - 4.0 * sf,
+                    config.colors.selection_background.to_f32_rgba(0.38),
+                ));
+                self.fg_instances.push(QuadInstance::solid(
+                    rect.x,
+                    rect.y + menu_h - 2.0 * sf,
+                    rect.w,
+                    2.0 * sf,
+                    config.colors.cursor_color.to_f32_rgba(1.0),
+                ));
+            }
+            let label = &menubar.menus[*index].title;
+            Self::emit_shaped_label(
+                &mut self.atlas,
+                &mut self.shaper,
+                &mut self.fg_instances,
+                config,
+                font_sys,
+                label,
+                (rect.w / cw).floor().max(4.0) as usize,
+                rect.x + pad,
+                title_baseline,
+                fg.to_f32_rgba(if active { 1.0 } else { 0.78 }),
+                active,
+            );
+        }
+
+        if let Some(panel) = layout.dropdown {
+            self.overlay_instances.push(QuadInstance::solid(
+                panel.x + 5.0 * sf,
+                panel.y + 5.0 * sf,
+                panel.w,
+                panel.h,
+                [0.0, 0.0, 0.0, 0.38],
             ));
+            self.overlay_instances.push(QuadInstance::solid(
+                panel.x,
+                panel.y,
+                panel.w,
+                panel.h,
+                bar_bg.to_f32_rgba(0.995),
+            ));
+            self.overlay_instances.push(QuadInstance::hollow(
+                panel.x,
+                panel.y,
+                panel.w,
+                panel.h,
+                fg.to_f32_rgba(0.24),
+            ));
+
+            let Some(menu_index) = menubar.open else {
+                return;
+            };
+            let Some(menu) = menubar.menus.get(menu_index) else {
+                return;
+            };
+            for (row, rect) in &layout.rows {
+                let Some(entry) = menu.entries.get(*row) else {
+                    continue;
+                };
+                let selected = menubar.selected == *row;
+                let hovered = menubar.hovered_item == Some(*row) && entry.enabled;
+                if entry.action.is_some() && (selected || hovered) {
+                    self.overlay_instances.push(QuadInstance::solid(
+                        rect.x,
+                        rect.y,
+                        rect.w,
+                        rect.h,
+                        config.colors.selection_background.to_f32_rgba(0.38),
+                    ));
+                }
+                if entry.action.is_none() {
+                    if entry.label.is_empty() {
+                        self.overlay_instances.push(QuadInstance::solid(
+                            rect.x + 4.0 * sf,
+                            rect.y + rect.h * 0.5,
+                            rect.w - 8.0 * sf,
+                            1.0,
+                            fg.to_f32_rgba(0.12),
+                        ));
+                    } else {
+                        Self::emit_shaped_label(
+                            &mut self.atlas,
+                            &mut self.shaper,
+                            &mut self.overlay_instances,
+                            config,
+                            font_sys,
+                            &entry.label,
+                            (rect.w / cw).floor().max(4.0) as usize,
+                            rect.x + 8.0 * sf,
+                            rect.y + (rect.h - ch) * 0.5 + baseline,
+                            fg.to_f32_rgba(0.42),
+                            false,
+                        );
+                    }
+                    continue;
+                }
+
+                let label_color = if !entry.enabled {
+                    fg.to_f32_rgba(0.32)
+                } else if selected || hovered {
+                    config.colors.cursor_color.to_f32_rgba(1.0)
+                } else {
+                    fg.to_f32_rgba(0.88)
+                };
+                Self::emit_shaped_label(
+                    &mut self.atlas,
+                    &mut self.shaper,
+                    &mut self.overlay_instances,
+                    config,
+                    font_sys,
+                    &entry.label,
+                    ((rect.w - 100.0 * sf) / cw).floor().max(4.0) as usize,
+                    rect.x + 8.0 * sf,
+                    rect.y + (rect.h - ch) * 0.5 + baseline,
+                    label_color,
+                    entry.enabled && (selected || hovered),
+                );
+
+                if !entry.shortcut.is_empty() {
+                    let shortcut_w = entry.shortcut.chars().count() as f32 * cw;
+                    Self::emit_shaped_label(
+                        &mut self.atlas,
+                        &mut self.shaper,
+                        &mut self.overlay_instances,
+                        config,
+                        font_sys,
+                        &entry.shortcut,
+                        (rect.w / cw).floor().max(4.0) as usize,
+                        rect.x + rect.w - shortcut_w - 8.0 * sf,
+                        rect.y + (rect.h - ch) * 0.5 + baseline,
+                        fg.to_f32_rgba(if entry.enabled { 0.48 } else { 0.28 }),
+                        false,
+                    );
+                }
+            }
         }
     }
 
@@ -1191,19 +1393,18 @@ impl RenderEngine {
                     } else {
                         fg.to_f32_rgba(0.60)
                     };
-                    let ax = (geom.x + geom.w - geom.pad_x - 6.0 * sf).round();
-                    let ay = (row.y + row.h * 0.5).round();
-                    let step = (1.5 * sf).max(1.0);
-                    for i in 0..4 {
-                        let half = (4 - i) as f32 * sf;
-                        self.overlay_instances.push(QuadInstance::solid(
-                            ax + i as f32 * step,
-                            (ay - half).round(),
-                            step,
-                            (half * 2.0 + 1.0).round(),
-                            arrow_col,
-                        ));
-                    }
+                    let icon = (10.0 * sf).round();
+                    let ax = (geom.x + geom.w - geom.pad_x - 14.0 * sf).round();
+                    let ay = (row.y + row.h * 0.5 - icon * 0.5).round();
+                    crate::renderer::icons::emit(
+                        &mut self.atlas,
+                        &mut self.overlay_instances,
+                        crate::renderer::icons::IconId::ChevronRight,
+                        ax,
+                        ay,
+                        icon,
+                        arrow_col,
+                    );
                 }
                 MenuEntry::Separator => {}
             }
@@ -2910,6 +3111,8 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
+                0.0,
             );
             save_scene_png(
                 Path::new(&splits_png),
@@ -2943,6 +3146,8 @@ mod tests {
             None,
             false,
             None,
+            None,
+            0.0,
         );
         assert!(!instances.is_empty());
 
@@ -2981,6 +3186,8 @@ mod tests {
             None,
             false,
             None,
+            None,
+            0.0,
         );
         assert!(!instances_h.is_empty());
 
@@ -3063,6 +3270,8 @@ mod tests {
                 None,
                 false,
                 None,
+                None,
+                0.0,
             );
             save_scene_png(
                 Path::new(&light_png),
@@ -3097,6 +3306,8 @@ mod tests {
                     None,
                     false,
                     None,
+                    None,
+                    0.0,
                 );
                 save_scene_png(
                     Path::new(&light_help_png),
@@ -3161,6 +3372,8 @@ mod tests {
             None,
             false,
             None,
+            None,
+            0.0,
         );
 
         let ch = font_sys.metrics.cell_height;

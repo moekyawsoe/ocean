@@ -45,7 +45,30 @@ pub enum WorkspaceMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarPanel {
     Explorer,
+    Search,
     Problems,
+    Plugins,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub path: PathBuf,
+    pub line: usize,
+    pub col: usize,
+    pub preview: String,
+}
+
+#[derive(Debug, Default)]
+pub struct WorkspaceSearch {
+    pub query: String,
+    pub replace: String,
+    pub field: usize,
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+    pub active: bool,
+    pub results: Vec<SearchHit>,
+    pub selected: usize,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +111,11 @@ pub struct EditorWorkspace {
     pub active_panel: SidebarPanel,
     pub activity_bar_visible: bool,
     pub close_confirm_requested: bool,
+    pub ui_scale: f32,
+    pub menu_height: f32,
+    pub recent_files: Vec<PathBuf>,
+    pub search: WorkspaceSearch,
+    pending_replace_all: Option<usize>,
 }
 
 impl Default for EditorWorkspace {
@@ -130,7 +158,201 @@ impl EditorWorkspace {
             active_panel: SidebarPanel::Explorer,
             activity_bar_visible: true,
             close_confirm_requested: false,
+            ui_scale: 1.0,
+            menu_height: 0.0,
+            recent_files: Vec::new(),
+            search: WorkspaceSearch::default(),
+            pending_replace_all: None,
         }
+    }
+
+    pub fn recent_files(&self) -> &[PathBuf] {
+        &self.recent_files
+    }
+
+    pub fn take_replace_all_request(&mut self) -> Option<usize> {
+        self.pending_replace_all.take()
+    }
+
+    pub fn run_search(&mut self) {
+        self.search.results.clear();
+        self.search.selected = 0;
+        let query = self.search.query.clone();
+        if query.is_empty() {
+            self.search.message = Some("Type a search query".to_string());
+            return;
+        }
+
+        let root = if self.workspace_dir.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            self.workspace_dir.clone()
+        };
+        let walker = ignore::WalkBuilder::new(&root)
+            .hidden(true)
+            .git_ignore(true)
+            .max_depth(Some(12))
+            .build();
+        let mut count = 0usize;
+        let mut files = 0usize;
+
+        for entry in walker.flatten() {
+            if count >= 500 {
+                break;
+            }
+            let path = entry.path();
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                continue;
+            }
+            if path
+                .metadata()
+                .map(|metadata| metadata.len() > 2 * 1024 * 1024)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            files += 1;
+            for (line_idx, line) in text.lines().enumerate() {
+                for (start, _end) in find_matches(
+                    line,
+                    &query,
+                    self.search.case_sensitive,
+                    self.search.whole_word,
+                ) {
+                    count += 1;
+                    self.search.results.push(SearchHit {
+                        path: path.to_path_buf(),
+                        line: line_idx,
+                        col: start,
+                        preview: line.trim().chars().take(160).collect(),
+                    });
+                    if count >= 500 {
+                        break;
+                    }
+                }
+                if count >= 500 {
+                    break;
+                }
+            }
+        }
+
+        self.search.message = Some(format!(
+            "{} result{} in {} file{}",
+            count,
+            if count == 1 { "" } else { "s" },
+            files,
+            if files == 1 { "" } else { "s" }
+        ));
+    }
+
+    pub fn replace_all_search(&mut self) {
+        let query = self.search.query.clone();
+        let replacement = self.search.replace.clone();
+        if query.is_empty() {
+            return;
+        }
+        let mut paths: Vec<PathBuf> = Vec::new();
+        for hit in &self.search.results {
+            if !paths.contains(&hit.path) {
+                paths.push(hit.path.clone());
+            }
+        }
+
+        let mut replaced = 0usize;
+        for path in paths {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (updated, count) = replace_in_text(
+                &text,
+                &query,
+                &replacement,
+                self.search.case_sensitive,
+                self.search.whole_word,
+            );
+            if count == 0 {
+                continue;
+            }
+            replaced += count;
+            if write_file_atomic(&path, updated.as_bytes()).is_err() {
+                continue;
+            }
+            if let Some(index) = self
+                .documents
+                .iter()
+                .position(|document| document.path() == Some(&path))
+            {
+                let old_cursor = self.documents[index].cursor;
+                let old_scroll = self.documents[index].scroll_y;
+                if let Ok(mut document) = EditorDocument::open(&path) {
+                    let last_line = document.buffer.len_lines().saturating_sub(1);
+                    let line = old_cursor.line.min(last_line);
+                    document.cursor = crate::editor::document::Cursor::new(line, 0);
+                    document.scroll_y = old_scroll.min(last_line);
+                    document.scroll_to_cursor_requested = true;
+                    self.documents[index] = document;
+                }
+            }
+        }
+
+        self.search.results.clear();
+        self.run_search();
+        self.search.message = Some(format!("Replaced {replaced} occurrence(s)"));
+    }
+
+    fn handle_search_key(&mut self, event: &KeyEvent, modifiers: ModifiersState) {
+        let ctrl = modifiers.control_key();
+        match &event.logical_key {
+            Key::Named(NamedKey::Escape) => {
+                self.search.active = false;
+            }
+            Key::Named(NamedKey::Tab) => {
+                self.search.field = (self.search.field + 1) % 2;
+            }
+            Key::Named(NamedKey::Enter) => {
+                if ctrl {
+                    if !self.search.results.is_empty() {
+                        self.pending_replace_all = Some(self.search.results.len());
+                    }
+                } else {
+                    self.run_search();
+                }
+            }
+            Key::Named(NamedKey::Backspace) => {
+                if self.search.field == 0 {
+                    self.search.query.pop();
+                } else {
+                    self.search.replace.pop();
+                }
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                self.search.selected = self.search.selected.saturating_sub(1);
+            }
+            Key::Named(NamedKey::ArrowDown) => {
+                if !self.search.results.is_empty() {
+                    self.search.selected =
+                        (self.search.selected + 1).min(self.search.results.len() - 1);
+                }
+            }
+            Key::Character(text) if !ctrl && !modifiers.alt_key() => {
+                if self.search.field == 0 {
+                    self.search.query.push_str(text);
+                } else {
+                    self.search.replace.push_str(text);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn record_recent_file(&mut self, path: &Path) {
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.recent_files.retain(|existing| existing != &path);
+        self.recent_files.insert(0, path);
+        self.recent_files.truncate(20);
     }
 
     pub fn has_unsaved(&self) -> bool {
@@ -210,6 +432,15 @@ impl EditorWorkspace {
         vp_y + Self::editor_tab_height(line_h) + self.breadcrumb_height(line_h)
     }
 
+    pub fn body_viewport(&self, vp: &EditorViewport) -> EditorViewport {
+        EditorViewport {
+            x: vp.x,
+            y: vp.y + self.menu_height,
+            w: vp.w,
+            h: (vp.h - self.menu_height).max(10.0),
+        }
+    }
+
     pub fn is_active(&self) -> bool {
         matches!(self.mode, WorkspaceMode::Split | WorkspaceMode::PureEditor)
     }
@@ -223,7 +454,7 @@ impl EditorWorkspace {
         if !self.is_active() || !self.accepts_text_input() {
             return false;
         }
-        self.active_doc().insert_text(text, font_sys);
+        self.active_doc().insert_text_all(text, font_sys);
         self.notify_doc_change();
         true
     }
@@ -248,6 +479,23 @@ impl EditorWorkspace {
         self.explorer.open_folder(p);
     }
 
+    pub fn open_command_palette(&mut self, workspace_dir: &Path) {
+        let mut palette = CommandPalette::new();
+        let commands = self.plugins.registered_commands();
+        palette.populate_items(workspace_dir, &commands);
+        self.palette = Some(palette);
+    }
+
+    pub fn undo_active(&mut self, font_sys: &mut FontSystem) {
+        self.active_doc().undo(font_sys);
+        self.notify_doc_change();
+    }
+
+    pub fn redo_active(&mut self, font_sys: &mut FontSystem) {
+        self.active_doc().redo(font_sys);
+        self.notify_doc_change();
+    }
+
     pub fn open_file<P: AsRef<Path>>(
         &mut self,
         path: P,
@@ -256,6 +504,7 @@ impl EditorWorkspace {
         let p = path.as_ref();
         let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
         let p = p.as_path();
+        self.record_recent_file(p);
         self.explorer.selected_path = Some(p.to_path_buf());
 
         if self.workspace_dir.as_os_str().is_empty()
@@ -272,6 +521,7 @@ impl EditorWorkspace {
             .position(|d| d.path() == Some(&p.to_path_buf()))
         {
             self.active_doc_idx = pos;
+            self.active_doc().clear_extra_cursors();
             self.vim.reset_to_normal();
             self.completion = None;
             self.hover = None;
@@ -302,6 +552,7 @@ impl EditorWorkspace {
                     self.lsp.did_open(p, &text, 1);
                 }
                 self.plugins.sync_buffer_text(&text);
+                self.active_doc().clear_extra_cursors();
                 self.completion = None;
                 self.hover = None;
                 self.completion_request = None;
@@ -316,6 +567,7 @@ impl EditorWorkspace {
         self.documents.push(EditorDocument::new());
         self.active_doc_idx = self.documents.len() - 1;
         self.vim.reset_to_normal();
+        self.active_doc().clear_extra_cursors();
     }
 
     pub fn close_active_document(&mut self) {
@@ -342,6 +594,7 @@ impl EditorWorkspace {
         self.hover = None;
         self.completion_request = None;
         self.hover_request = None;
+        self.active_doc().clear_extra_cursors();
         self.vim.reset_to_normal();
     }
 
@@ -349,6 +602,7 @@ impl EditorWorkspace {
         if !self.documents.is_empty() {
             self.active_doc_idx = (self.active_doc_idx + 1) % self.documents.len();
             self.vim.reset_to_normal();
+            self.active_doc().clear_extra_cursors();
             self.completion = None;
             self.hover = None;
         }
@@ -362,6 +616,7 @@ impl EditorWorkspace {
                 self.active_doc_idx - 1
             };
             self.vim.reset_to_normal();
+            self.active_doc().clear_extra_cursors();
             self.completion = None;
             self.hover = None;
         }
@@ -612,6 +867,11 @@ impl EditorWorkspace {
             return false;
         }
 
+        if self.active_panel == SidebarPanel::Search && self.search.active {
+            self.handle_search_key(event, modifiers);
+            return true;
+        }
+
         // 3. Find Bar handling
         if self.find_bar.is_active {
             match &event.logical_key {
@@ -656,7 +916,7 @@ impl EditorWorkspace {
                     if let Some(item) = comp.selected_item() {
                         let text = item.insert_text.clone();
                         self.completion = None;
-                        self.active_doc().insert_text(&text, font_sys);
+                        self.active_doc().insert_text_all(&text, font_sys);
                     } else {
                         self.completion = None;
                     }
@@ -726,7 +986,7 @@ impl EditorWorkspace {
             if let Some(cb) = clipboard
                 && let Ok(text) = cb.get_text()
             {
-                self.active_doc().insert_text(&text, font_sys);
+                self.active_doc().insert_text_all(&text, font_sys);
                 self.notify_doc_change();
             }
             return true;
@@ -749,6 +1009,7 @@ impl EditorWorkspace {
             && !shift
             && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("z"))
         {
+            self.active_doc().clear_extra_cursors();
             self.active_doc().undo(font_sys);
             self.notify_doc_change();
             return true;
@@ -760,8 +1021,20 @@ impl EditorWorkspace {
                 && shift
                 && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("z")))
         {
+            self.active_doc().clear_extra_cursors();
             self.active_doc().redo(font_sys);
             self.notify_doc_change();
+            return true;
+        }
+
+        // Ctrl+Shift+F: Workspace Search
+        if ctrl
+            && shift
+            && matches!(&event.logical_key, Key::Character(s) if s.eq_ignore_ascii_case("f"))
+        {
+            self.active_panel = SidebarPanel::Search;
+            self.explorer.visible = true;
+            self.search.active = true;
             return true;
         }
 
@@ -799,16 +1072,39 @@ impl EditorWorkspace {
             return true;
         }
 
+        if ctrl
+            && alt
+            && matches!(
+                event.logical_key,
+                Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowDown)
+            )
+        {
+            let delta = if matches!(event.logical_key, Key::Named(NamedKey::ArrowUp)) {
+                -1
+            } else {
+                1
+            };
+            self.active_doc().add_caret_vertical(delta, font_sys);
+            return true;
+        }
+        if matches!(event.logical_key, Key::Named(NamedKey::Escape))
+            && self.active_doc_ref().caret_count() > 1
+            && (!self.vim.enabled || self.vim.mode == VimMode::Insert)
+        {
+            self.active_doc().clear_extra_cursors();
+            return true;
+        }
+
         // 6. Navigation and Editing Keys
         match &event.logical_key {
             Key::Named(NamedKey::ArrowLeft) => {
                 self.hover = None;
-                self.active_doc().move_left(shift, font_sys);
+                self.active_doc().move_carets(-1, 0, shift, font_sys);
                 return true;
             }
             Key::Named(NamedKey::ArrowRight) => {
                 self.hover = None;
-                self.active_doc().move_right(shift, font_sys);
+                self.active_doc().move_carets(1, 0, shift, font_sys);
                 return true;
             }
             Key::Named(NamedKey::ArrowUp) => {
@@ -816,7 +1112,7 @@ impl EditorWorkspace {
                 if ctrl {
                     self.active_doc().scroll_y = self.active_doc().scroll_y.saturating_sub(1);
                 } else {
-                    self.active_doc().move_up(shift, font_sys);
+                    self.active_doc().move_carets(0, -1, shift, font_sys);
                 }
                 return true;
             }
@@ -826,7 +1122,7 @@ impl EditorWorkspace {
                     let max_scroll = self.active_doc().buffer.len_lines().saturating_sub(1);
                     self.active_doc().scroll_y = (self.active_doc().scroll_y + 1).min(max_scroll);
                 } else {
-                    self.active_doc().move_down(shift, font_sys);
+                    self.active_doc().move_carets(0, 1, shift, font_sys);
                 }
                 return true;
             }
@@ -852,13 +1148,13 @@ impl EditorWorkspace {
             }
             Key::Named(NamedKey::Backspace) => {
                 self.hover = None;
-                self.active_doc().backspace(font_sys);
+                self.active_doc().backspace_all(font_sys);
                 self.notify_doc_change();
                 return true;
             }
             Key::Named(NamedKey::Delete) => {
                 self.hover = None;
-                self.active_doc().delete(font_sys);
+                self.active_doc().delete_all(font_sys);
                 self.notify_doc_change();
                 return true;
             }
@@ -869,25 +1165,25 @@ impl EditorWorkspace {
                 let line_str = self.active_doc().buffer.line_without_newline(cur_line);
                 let indent: String = line_str.chars().take_while(|c| c.is_whitespace()).collect();
                 let insert = format!("\n{indent}");
-                self.active_doc().insert_text(&insert, font_sys);
+                self.active_doc().insert_text_all(&insert, font_sys);
                 self.notify_doc_change();
                 return true;
             }
             Key::Named(NamedKey::Tab) => {
                 self.hover = None;
-                self.active_doc().insert_text("    ", font_sys);
+                self.active_doc().insert_text_all("    ", font_sys);
                 self.notify_doc_change();
                 return true;
             }
             Key::Named(NamedKey::Space) if !ctrl && !alt => {
                 self.hover = None;
-                self.active_doc().insert_text(" ", font_sys);
+                self.active_doc().insert_text_all(" ", font_sys);
                 self.notify_doc_change();
                 return true;
             }
             Key::Character(s) if !ctrl && !alt => {
                 self.hover = None;
-                self.active_doc().insert_text(s, font_sys);
+                self.active_doc().insert_text_all(s, font_sys);
                 self.notify_doc_change();
 
                 // Trigger completion if alphanumeric
@@ -908,7 +1204,7 @@ impl EditorWorkspace {
             && !text.chars().any(char::is_control)
         {
             self.hover = None;
-            self.active_doc().insert_text(text, font_sys);
+            self.active_doc().insert_text_all(text, font_sys);
             self.notify_doc_change();
             return true;
         }
@@ -968,13 +1264,20 @@ impl EditorWorkspace {
             return false;
         }
 
+        let body_vp = self.body_viewport(vp);
+        let vp = &body_vp;
         let line_h = font_sys.metrics.cell_height;
         let cell_w = font_sys.metrics.cell_width;
         let _ = tab_h;
 
-        let activity_w = if self.activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
         if self.activity_bar_visible && px >= vp.x && px < vp.x + activity_w {
-            let index = ((py - vp.y - 10.0) / 44.0).floor();
+            let ui = self.ui_scale.max(0.5);
+            let index = ((py - vp.y - 8.0 * ui) / (44.0 * ui)).floor();
             if index >= 0.0 {
                 match index as usize {
                     0 => {
@@ -986,6 +1289,11 @@ impl EditorWorkspace {
                         }
                     }
                     1 => {
+                        self.active_panel = SidebarPanel::Search;
+                        self.explorer.visible = true;
+                        self.search.active = true;
+                    }
+                    2 => {
                         if self.active_panel == SidebarPanel::Problems && self.explorer.visible {
                             self.explorer.visible = false;
                         } else {
@@ -993,24 +1301,31 @@ impl EditorWorkspace {
                             self.explorer.visible = true;
                         }
                     }
-                    _ => {
-                        let mut cp = CommandPalette::new();
-                        let plugin_cmds = self.plugins.registered_commands();
-                        cp.populate_items(&self.workspace_dir, &plugin_cmds);
-                        self.palette = Some(cp);
+                    3 => {
+                        if self.active_panel == SidebarPanel::Plugins && self.explorer.visible {
+                            self.explorer.visible = false;
+                        } else {
+                            self.active_panel = SidebarPanel::Plugins;
+                            self.explorer.visible = true;
+                        }
                     }
+                    _ => {}
                 }
             }
             return true;
         }
 
         let panel_open = self.explorer.visible
-            && (self.active_panel == SidebarPanel::Problems || self.explorer.is_open());
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
         let sidebar_w = if panel_open {
-            if self.active_panel == SidebarPanel::Problems {
-                self.explorer.width.max(230.0).min((vp.w - 160.0).max(80.0))
-            } else {
-                self.explorer.width.min(vp.w - 100.0).max(80.0)
+            match self.active_panel {
+                SidebarPanel::Search => {
+                    self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                    self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
             }
         } else {
             0.0
@@ -1044,6 +1359,39 @@ impl EditorWorkspace {
                             let _ = self.open_file(&file_to_open, proxy);
                         }
                     }
+                    SidebarPanel::Search => {
+                        let header_h = (line_h + 6.0).round();
+                        let field_h = (line_h + 4.0).round();
+                        let item_h = (line_h + 3.0).round();
+                        let query_y = vp.y + header_h;
+                        let replace_y = query_y + field_h;
+                        let options_y = replace_y + field_h;
+                        let results_y = options_y + field_h;
+
+                        if py >= query_y && py < replace_y {
+                            self.search.active = true;
+                            self.search.field = 0;
+                        } else if py >= replace_y && py < options_y {
+                            self.search.active = true;
+                            self.search.field = 1;
+                        } else if py >= options_y && py < results_y {
+                            if px < sx + 44.0 * self.ui_scale.max(0.5) {
+                                self.search.case_sensitive = !self.search.case_sensitive;
+                            } else {
+                                self.search.whole_word = !self.search.whole_word;
+                            }
+                        } else if py >= results_y {
+                            let row = ((py - results_y) / item_h).floor();
+                            if row >= 0.0
+                                && let Some(hit) = self.search.results.get(row as usize).cloned()
+                            {
+                                let _ = self.open_file(&hit.path, proxy);
+                                self.active_doc().move_to_line(hit.line, font_sys);
+                                self.editor_focused = true;
+                                self.search.active = false;
+                            }
+                        }
+                    }
                     SidebarPanel::Problems => {
                         let header_h = (line_h + 6.0).round();
                         let item_h = (line_h + 3.0).round();
@@ -1055,6 +1403,21 @@ impl EditorWorkspace {
                             let _ = self.open_file(&problem.path, proxy);
                             self.active_doc().move_to_line(problem.line, font_sys);
                             self.editor_focused = true;
+                        }
+                    }
+                    SidebarPanel::Plugins => {
+                        let header_h = (line_h + 6.0).round();
+                        let item_h = (line_h + 4.0).round();
+                        if py >= vp.y && py < vp.y + header_h {
+                            self.plugins.reload_plugins();
+                            return true;
+                        }
+                        let row = ((py - vp.y - header_h) / item_h).floor();
+                        if row >= 0.0
+                            && let Some(info) = crate::plugins::list().get(row as usize).cloned()
+                        {
+                            let _ = crate::plugins::set_enabled(&info.id, !info.enabled);
+                            self.plugins.reload_plugins();
                         }
                     }
                 }
@@ -1081,17 +1444,19 @@ impl EditorWorkspace {
                 if tab_idx < self.documents.len() {
                     let tab_x = code_vp.x + 4.0 + tab_idx as f32 * (tab_w + 4.0);
                     self.active_doc_idx = tab_idx;
-                    if px >= tab_x + tab_w - 20.0 && px <= tab_x + tab_w {
+                    let ui = self.ui_scale.max(0.5);
+                    if px >= tab_x + tab_w - 22.0 * ui && px <= tab_x + tab_w {
                         self.request_close_active();
                     }
                     return true;
                 }
             }
 
+            let ui = self.ui_scale.max(0.5);
             let plus_x = code_vp.x + 4.0 + count as f32 * (tab_w + 4.0);
-            if plus_x + 20.0 <= code_vp.x + code_vp.w
+            if plus_x + 22.0 * ui <= code_vp.x + code_vp.w
                 && px >= plus_x
-                && px <= plus_x + (ed_tab_h - 4.0)
+                && px <= plus_x + (ed_tab_h - 4.0 * ui)
             {
                 self.new_document();
                 self.active_doc_idx = self.documents.len() - 1;
@@ -1147,6 +1512,12 @@ impl EditorWorkspace {
             return true;
         }
 
+        if modifiers.alt_key() {
+            self.active_doc()
+                .extra_caret_at_pixel(px, py, code_vp.x, content_y, gutter_w, line_h, font_sys);
+            return true;
+        }
+
         let now = std::time::Instant::now();
         let is_double_click = now.duration_since(self.last_click_time).as_millis() < 350
             && (px - self.last_click_pos.0).abs() < 5.0
@@ -1182,17 +1553,27 @@ impl EditorWorkspace {
         tab_h: f32,
         font_sys: &mut FontSystem,
     ) {
+        let body_vp = self.body_viewport(vp);
+        let vp = &body_vp;
         let _ = tab_h;
         let line_h = font_sys.metrics.cell_height;
         let cell_w = font_sys.metrics.cell_width;
-        let activity_w = if self.activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
         let panel_open = self.explorer.visible
-            && (self.active_panel == SidebarPanel::Problems || self.explorer.is_open());
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
         let sidebar_w = if panel_open {
-            if self.active_panel == SidebarPanel::Problems {
-                self.explorer.width.max(230.0).min((vp.w - 160.0).max(80.0))
-            } else {
-                self.explorer.width.min(vp.w - 100.0).max(80.0)
+            match self.active_panel {
+                SidebarPanel::Search => {
+                    self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                    self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
             }
         } else {
             0.0
@@ -1239,16 +1620,26 @@ impl EditorWorkspace {
             return false;
         }
 
+        let body_vp = self.body_viewport(vp);
+        let vp = &body_vp;
         let _ = tab_h;
         let line_h = font_sys.metrics.cell_height;
-        let activity_w = if self.activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
         let panel_open = self.explorer.visible
-            && (self.active_panel == SidebarPanel::Problems || self.explorer.is_open());
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
         let sidebar_w = if panel_open {
-            if self.active_panel == SidebarPanel::Problems {
-                self.explorer.width.max(230.0).min((vp.w - 160.0).max(80.0))
-            } else {
-                self.explorer.width.min(vp.w - 100.0).max(80.0)
+            match self.active_panel {
+                SidebarPanel::Search => {
+                    self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                    self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
             }
         } else {
             0.0
@@ -1290,16 +1681,26 @@ impl EditorWorkspace {
         tab_h: f32,
         font_sys: &mut FontSystem,
     ) -> bool {
+        let body_vp = self.body_viewport(vp);
+        let vp = &body_vp;
         let _ = tab_h;
         let line_h = font_sys.metrics.cell_height;
-        let activity_w = if self.activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
         let panel_open = self.explorer.visible
-            && (self.active_panel == SidebarPanel::Problems || self.explorer.is_open());
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
         let sidebar_w = if panel_open {
-            if self.active_panel == SidebarPanel::Problems {
-                self.explorer.width.max(230.0).min((vp.w - 160.0).max(80.0))
-            } else {
-                self.explorer.width.min(vp.w - 100.0).max(80.0)
+            match self.active_panel {
+                SidebarPanel::Search => {
+                    self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                    self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
             }
         } else {
             0.0
@@ -1336,16 +1737,26 @@ impl EditorWorkspace {
         vp: &EditorViewport,
         multiplier: f32,
     ) -> bool {
+        let body_vp = self.body_viewport(vp);
+        let vp = &body_vp;
         let line_h = font_sys.metrics.cell_height;
         let cell_w = font_sys.metrics.cell_width;
-        let activity_w = if self.activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if self.activity_bar_visible {
+            44.0 * self.ui_scale
+        } else {
+            0.0
+        };
         let panel_open = self.explorer.visible
-            && (self.active_panel == SidebarPanel::Problems || self.explorer.is_open());
+            && (self.active_panel != SidebarPanel::Explorer || self.explorer.is_open());
         let sidebar_w = if panel_open {
-            if self.active_panel == SidebarPanel::Problems {
-                self.explorer.width.max(230.0).min((vp.w - 160.0).max(80.0))
-            } else {
-                self.explorer.width.min(vp.w - 100.0).max(80.0)
+            match self.active_panel {
+                SidebarPanel::Search => {
+                    self.explorer.width.max(280.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Problems | SidebarPanel::Plugins => {
+                    self.explorer.width.max(240.0).min((vp.w - 160.0).max(80.0))
+                }
+                SidebarPanel::Explorer => self.explorer.width.min(vp.w - 100.0).max(80.0),
             }
         } else {
             0.0
@@ -1667,6 +2078,7 @@ impl EditorWorkspace {
         let plugin_items = self.plugins.status_items();
 
         let problems = self.collect_problems();
+        let plugin_infos = self.plugins.plugin_infos().to_vec();
 
         let doc_titles: Vec<(String, bool)> = self
             .documents
@@ -1684,6 +2096,7 @@ impl EditorWorkspace {
         } else {
             None
         };
+        let ui_scale = self.ui_scale;
 
         let doc = &mut self.documents[active_idx];
 
@@ -1711,12 +2124,111 @@ impl EditorWorkspace {
             self.dragging_scrollbar,
             self.scrollbar_hovered,
             &problems,
+            &plugin_infos,
+            &self.search,
             self.active_panel,
             self.activity_bar_visible,
             vim_view,
             ime_preedit,
+            ui_scale,
+            self.menu_height,
         );
     }
+}
+
+fn char_eq_ci(a: char, b: char) -> bool {
+    a == b || a.to_lowercase().eq(b.to_lowercase())
+}
+
+fn is_search_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn find_matches(
+    line: &str,
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Vec<(usize, usize)> {
+    let hay: Vec<char> = line.chars().collect();
+    let needle: Vec<char> = query.chars().collect();
+    if needle.is_empty() || hay.len() < needle.len() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    let mut i = 0;
+    while i + needle.len() <= hay.len() {
+        let matched = (0..needle.len()).all(|offset| {
+            if case_sensitive {
+                hay[i + offset] == needle[offset]
+            } else {
+                char_eq_ci(hay[i + offset], needle[offset])
+            }
+        });
+        let word_ok = !whole_word
+            || ((i == 0 || !is_search_word_char(hay[i - 1]))
+                && (i + needle.len() == hay.len() || !is_search_word_char(hay[i + needle.len()])));
+        if matched && word_ok {
+            matches.push((i, i + needle.len()));
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    matches
+}
+
+fn replace_in_text(
+    text: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> (String, usize) {
+    let hay: Vec<char> = text.chars().collect();
+    let needle: Vec<char> = query.chars().collect();
+    if needle.is_empty() {
+        return (text.to_string(), 0);
+    }
+
+    let mut output = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut last = 0;
+    let mut count = 0;
+    while i + needle.len() <= hay.len() {
+        let matched = (0..needle.len()).all(|offset| {
+            if case_sensitive {
+                hay[i + offset] == needle[offset]
+            } else {
+                char_eq_ci(hay[i + offset], needle[offset])
+            }
+        });
+        let word_ok = !whole_word
+            || ((i == 0 || !is_search_word_char(hay[i - 1]))
+                && (i + needle.len() == hay.len() || !is_search_word_char(hay[i + needle.len()])));
+        if matched && word_ok {
+            output.extend(hay[last..i].iter());
+            output.push_str(replacement);
+            i += needle.len();
+            last = i;
+            count += 1;
+        } else {
+            i += 1;
+        }
+    }
+    output.extend(hay[last..].iter());
+    (output, count)
+}
+
+fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("ocean");
+    let tmp = path.with_file_name(format!(".{name}.{}.ocean-tmp", std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|err| err.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|err| err.to_string())
 }
 
 #[derive(Default)]
@@ -1753,6 +2265,7 @@ fn vim_process(
             doc.selection_anchor = None;
             doc.selection_kind = SelectionKind::Char;
         }
+        doc.clear_extra_cursors();
         vim.reset_to_normal();
         return out;
     }
@@ -1792,6 +2305,7 @@ fn vim_process(
     if ctrl {
         if let Some(s) = text {
             if s.eq_ignore_ascii_case("r") {
+                doc.clear_extra_cursors();
                 doc.redo(font_sys);
                 out.changed = true;
             } else if s.eq_ignore_ascii_case("d") {
@@ -2091,6 +2605,7 @@ fn vim_process(
             out.changed = true;
         }
         Some("u") => {
+            doc.clear_extra_cursors();
             doc.undo(font_sys);
             out.changed = true;
             vim.count.clear();
@@ -2286,5 +2801,28 @@ mod tests {
         let drag_res = ws.handle_scrollbar_drag(300.0, &vp, 0.0, &mut font_sys);
         assert!(drag_res);
         assert!(ws.active_doc().scroll_y > 10);
+    }
+
+    #[test]
+    fn test_workspace_search_matches_case_and_whole_word() {
+        assert_eq!(
+            find_matches("let foo = Foo;", "foo", false, false),
+            vec![(4, 7), (10, 13)]
+        );
+        assert_eq!(
+            find_matches("let foo = Foo;", "foo", false, true),
+            vec![(4, 7), (10, 13)]
+        );
+        assert_eq!(
+            find_matches("let foo = Foo;", "foo", true, false),
+            vec![(4, 7)]
+        );
+    }
+
+    #[test]
+    fn test_workspace_search_replace_preserves_myanmar_text() {
+        let (updated, count) = replace_in_text("မင်္ဂလာပါ foo", "foo", "ကမ္ဘာ", false, true);
+        assert_eq!(count, 1);
+        assert_eq!(updated, "မင်္ဂလာပါ ကမ္ဘာ");
     }
 }

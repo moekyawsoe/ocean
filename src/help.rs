@@ -685,6 +685,26 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "Prompts Save / Discard / Cancel; :q! is the explicit force-discard",
             ),
             RawDocItem::KeyValue(
+                "F10 / Edit menu bar",
+                "File / Edit / View / Go / Help menus with recent files and quick open",
+            ),
+            RawDocItem::KeyValue(
+                "Ctrl+Shift+F / Ctrl+Enter",
+                "Workspace search panel; Ctrl+Enter replaces all after confirmation",
+            ),
+            RawDocItem::KeyValue(
+                "Alt+Click / Ctrl+Alt+Up/Down",
+                "Add cursors; typing and edits apply to every cursor (Esc clears)",
+            ),
+            RawDocItem::KeyValue(
+                "ocean +plugin-install / +plugin-list",
+                "Install, list, enable/disable, verify, update, or remove WASM plugins",
+            ),
+            RawDocItem::KeyValue(
+                "restore-session / autosave-interval",
+                "Restore open docs and snapshot dirty buffers for crash recovery",
+            ),
+            RawDocItem::KeyValue(
                 "editor-keymap = vim",
                 "Enable Normal/Insert/Visual modes (i, Esc, v, V, d/y/c, :w/:q)",
             ),

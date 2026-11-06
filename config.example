@@ -73,8 +73,17 @@ window-show-tab-bar = auto
 # Neovim-style bottom shortcut & mode status bar (`true` / `false`, toggle live with `Ctrl+Shift+B`)
 window-show-status-bar = true
 
+# Top editor menu bar (File / Edit / View / Go / Help) when the editor is open
+window-show-menu-bar = true
+
 # Built-in editor keymap: `modeless` (default) or `vim` (Normal / Insert / Visual / Visual-Line)
 editor-keymap = modeless
+
+# Restore open editor documents/workspace on launch and recover unsaved buffers after a crash
+restore-session = true
+crash-recovery = true
+# Seconds between crash-recovery snapshots (0 disables)
+autosave-interval = 15
 
 # Display backend: `auto` (default), `wayland`, or `x11` (XWayland)
 # Under `auto` on Linux, Ocean automatically selects XWayland when running under GNOME

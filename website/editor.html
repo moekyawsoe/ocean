@@ -242,7 +242,9 @@
                 <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active document to disk</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the fuzzy file/command palette</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Show / hide the file explorer sidebar</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Open workspace search and replace</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in file (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> cycle matches, <kbd>Esc</kbd> closes)</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>Click</kbd></td><td>Add a cursor; <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd> adds one above or below</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Trigger LSP autocompletion (<kbd>Up</kbd>/<kbd>Down</kbd> navigate, <kbd>Enter</kbd>/<kbd>Tab</kbd> accept, <kbd>Esc</kbd> dismiss)</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Hover documentation for the symbol under the cursor</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo the last edit transaction, restoring the cursor</td></tr>
@@ -256,6 +258,20 @@
               </tbody>
             </table>
           </div>
+
+          <h3>Workspace search &amp; multi-cursor</h3>
+          <p>
+            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> or the <strong>Search</strong> activity-bar icon opens the
+            workspace search panel. Type a query and press <kbd>Enter</kbd>; use <kbd>Tab</kbd> to switch between the
+            find and replace fields, and <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to replace every match after a confirmation
+            dialog. <strong>Aa</strong> toggles case sensitivity and <strong>W</strong> toggles whole-word matching.
+            Results are clickable <code>file:line</code> rows and respect <code>.gitignore</code>.
+          </p>
+          <p>
+            Add cursors with <kbd>Alt</kbd>+<kbd>Click</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd>.
+            Typing, <kbd>Backspace</kbd>, <kbd>Delete</kbd>, paste, and arrow movement apply to every cursor;
+            <kbd>Esc</kbd> clears the extra cursors. The status bar shows the active cursor count.
+          </p>
 
           <div class="docs-note">
             The editor consumes editing keys only while it has focus. Global terminal bindings that are not used by the
@@ -308,7 +324,11 @@
           <ul>
             <li><strong>Document tabs</strong> are always visible, with an active accent, unsaved dirty dot, per-tab close button, and a <code>+</code> button for a new document.</li>
             <li><strong>Breadcrumbs</strong> below the tabs show the active file path relative to the workspace root.</li>
-            <li><strong>Activity bar</strong> on the left switches between <strong>Explorer</strong> and <strong>Problems</strong>; the magnifier opens the command palette.</li>
+            <li><strong>Menu bar</strong> at the top of the editor (F10 or mouse) with File / Edit / View / Go / Help, recent files, quick open, find, view toggles, and split actions.</li>
+            <li><strong>Activity bar</strong> uses theme-tinted icons for <strong>Explorer</strong>, <strong>Search</strong>, <strong>Problems</strong>, and <strong>Plugins</strong>; the search icon opens the workspace search panel, while <kbd>Ctrl</kbd>+<kbd>P</kbd> remains the command palette.</li>
+            <li><strong>File-type icons</strong> appear on tabs, breadcrumbs, and explorer rows (Rust, TypeScript, JavaScript, Python, Go, C/C++, HTML, CSS, JSON, TOML, Markdown, Shell, Docker).</li>
+            <li><strong>Plugins panel</strong> lists installed plugins with version and enabled state; click a row to enable/disable it.</li>
+            <li><strong>Session restore &amp; autosave</strong> reopen documents, cursor positions, scroll offsets, and the workspace on launch. Dirty/untitled buffers are snapshotted every 15 seconds and recovered after a crash.</li>
             <li><strong>Problems panel</strong> lists diagnostics across open documents; click an entry to open the file and jump to the line.</li>
             <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state. It renders at 80% of the terminal font size by default.</li>
             <li><strong>Unsaved-work dialog</strong> appears before closing a dirty document, closing the last tab/pane, quitting, or pressing the window close button. Choices are <strong>Save</strong> / <strong>Discard</strong> / <strong>Cancel</strong> (or <strong>Save All</strong> / <strong>Discard All</strong> / <strong>Cancel</strong>); <kbd>Esc</kbd> always cancels. <code>:q!</code> is the explicit force-discard.</li>
@@ -437,8 +457,25 @@
           <h2>WASM plugins</h2>
           <p>
             Ocean embeds <code>extism</code> to run sandboxed WebAssembly plugins built for <code>wasm32-wasip1</code>.
-            Drop <code>.wasm</code> files into <code>~/.config/ocean/plugins/</code>; each file stem becomes the plugin name.
+            Installed plugins live in <code>~/.config/ocean/plugins/&lt;id&gt;.wasm</code> with an optional
+            <code>&lt;id&gt;.json</code> manifest and a shared <code>registry.json</code> for enabled state.
           </p>
+
+          <div class="docs-table-wrap">
+            <table class="docs-table">
+              <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+              <tbody>
+                <tr><td><code>ocean +plugin-list</code></td><td>List installed plugins, versions, and enabled state</td></tr>
+                <tr><td><code>ocean +plugin-install &lt;file.wasm|https://...&gt;</code></td><td>Install a local or downloaded plugin (SHA-256 verified; <code>--force</code> overwrites)</td></tr>
+                <tr><td><code>ocean +plugin-enable/disable &lt;id&gt;</code></td><td>Toggle a plugin without removing it</td></tr>
+                <tr><td><code>ocean +plugin-remove &lt;id&gt;</code></td><td>Uninstall (<code>--force</code> when enabled)</td></tr>
+                <tr><td><code>ocean +plugin-info &lt;id&gt;</code></td><td>Show the manifest, version, source, and checksum</td></tr>
+                <tr><td><code>ocean +plugin-verify &lt;id&gt;</code></td><td>Recompute and compare the plugin checksum</td></tr>
+                <tr><td><code>ocean +plugin-update &lt;id&gt;</code></td><td>Reinstall from the recorded source</td></tr>
+                <tr><td><code>ocean +plugins-dir</code></td><td>Print the plugin directory</td></tr>
+              </tbody>
+            </table>
+          </div>
 
           <div class="docs-table-wrap">
             <table class="docs-table">
@@ -511,8 +548,12 @@
 <span class="tok-key">keybind</span> = <span class="tok-val">ctrl+shift+i=toggle_editor</span>
 <span class="tok-key">keybind</span> = <span class="tok-val">ctrl+backslash=toggle_split_mode</span>
 
-<span class="tok-comment"># Editor keymap: modeless (default) or vim</span>
-<span class="tok-key">editor-keymap</span> = <span class="tok-val">modeless</span>
+<span class="tok-comment"># Editor menu bar, keymap, and session recovery</span>
+<span class="tok-key">window-show-menu-bar</span> = <span class="tok-val">true</span>
+<span class="tok-key">editor-keymap</span>        = <span class="tok-val">modeless</span>
+<span class="tok-key">restore-session</span>     = <span class="tok-val">true</span>
+<span class="tok-key">crash-recovery</span>      = <span class="tok-val">true</span>
+<span class="tok-key">autosave-interval</span>   = <span class="tok-val">15</span>
 
 <span class="tok-comment"># Theme and typography are shared with the terminal</span>
 <span class="tok-key">theme</span>                = <span class="tok-val">ocean-dark</span>

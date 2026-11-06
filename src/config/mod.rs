@@ -150,7 +150,11 @@ pub struct Config {
     pub window_vsync: bool,
     pub window_show_tab_bar: TabBarMode,
     pub window_show_status_bar: bool,
+    pub window_show_menu_bar: bool,
     pub editor_keymap: EditorKeymap,
+    pub restore_session: bool,
+    pub crash_recovery: bool,
+    pub autosave_interval_secs: u32,
     pub backend: BackendMode,
 
     // Terminal / Shell / Mouse / Clipboard
@@ -214,7 +218,11 @@ impl Default for Config {
             window_vsync: true,
             window_show_tab_bar: TabBarMode::Auto,
             window_show_status_bar: true,
+            window_show_menu_bar: true,
             editor_keymap: EditorKeymap::Modeless,
+            restore_session: true,
+            crash_recovery: true,
+            autosave_interval_secs: 15,
             backend: BackendMode::Auto,
 
             command: None,
@@ -732,6 +740,22 @@ impl Config {
                 }
                 _ => self.warn(line_no, key, val),
             },
+            "window-show-menu-bar" | "menu-bar" => match parse_bool(val) {
+                Some(b) => self.window_show_menu_bar = b,
+                None => self.warn(line_no, key, val),
+            },
+            "restore-session" => match parse_bool(val) {
+                Some(b) => self.restore_session = b,
+                None => self.warn(line_no, key, val),
+            },
+            "crash-recovery" => match parse_bool(val) {
+                Some(b) => self.crash_recovery = b,
+                None => self.warn(line_no, key, val),
+            },
+            "autosave-interval" | "autosave" => match val.parse::<u32>() {
+                Ok(seconds) => self.autosave_interval_secs = seconds.min(3600),
+                Err(_) => self.warn(line_no, key, val),
+            },
             "editor-keymap" | "editor-mode" | "editor-editing-mode" => {
                 match val.to_ascii_lowercase().as_str() {
                     "modeless" | "default" | "standard" => {
@@ -922,8 +946,18 @@ impl Config {
             self.window_show_status_bar
         ));
         out.push_str(&format!(
+            "window-show-menu-bar = {}\n",
+            self.window_show_menu_bar
+        ));
+        out.push_str(&format!(
             "editor-keymap = {}\n",
             self.editor_keymap.as_str()
+        ));
+        out.push_str(&format!("restore-session = {}\n", self.restore_session));
+        out.push_str(&format!("crash-recovery = {}\n", self.crash_recovery));
+        out.push_str(&format!(
+            "autosave-interval = {}\n",
+            self.autosave_interval_secs
         ));
         out.push_str(&format!("backend = {}\n", self.backend));
         out.push_str(&format!(

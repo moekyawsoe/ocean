@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use extism::{Function, Manifest, Plugin, PluginBuilder, UserData, ValType, Wasm};
 
+use crate::plugins::{self, PluginManifest};
+
 #[derive(Default, Clone)]
 pub struct HostSharedState {
     pub buffer_text: Arc<Mutex<String>>,
@@ -16,8 +18,17 @@ extism::host_fn!(pub ocean_get_buffer_slice(user_data: HostSharedState; offset: 
     let state_lock = user_data.get()?;
     let state = state_lock.lock().unwrap();
     let text = state.buffer_text.lock().unwrap();
-    let start = (offset.max(0) as usize).min(text.len());
-    let end = ((offset + len).max(0) as usize).min(text.len());
+    let mut start = (offset.max(0) as usize).min(text.len());
+    let mut end = (offset.max(0).saturating_add(len.max(0)) as usize).min(text.len());
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    if end < start {
+        end = start;
+    }
     Ok(text[start..end].to_string())
 });
 
@@ -46,11 +57,15 @@ pub struct LoadedPlugin {
     pub name: String,
     pub path: PathBuf,
     pub plugin: Plugin,
+    pub commands: Vec<(String, String)>,
+    pub status_items: Vec<String>,
+    pub manifest: Option<PluginManifest>,
 }
 
 pub struct PluginEngine {
     pub state: HostSharedState,
     pub plugins: Vec<LoadedPlugin>,
+    infos: Vec<plugins::PluginInfo>,
 }
 
 impl Default for PluginEngine {
@@ -64,95 +79,90 @@ impl PluginEngine {
         let mut engine = Self {
             state: HostSharedState::default(),
             plugins: Vec::new(),
+            infos: Vec::new(),
         };
         engine.reload_plugins();
         engine
     }
 
     pub fn plugins_dir() -> Option<PathBuf> {
-        let home = std::env::var_os("HOME")?;
-        Some(
-            PathBuf::from(home)
-                .join(".config")
-                .join("ocean")
-                .join("plugins"),
-        )
+        plugins::plugins_dir()
+    }
+
+    pub fn plugin_infos(&self) -> &[plugins::PluginInfo] {
+        &self.infos
     }
 
     pub fn reload_plugins(&mut self) {
         self.plugins.clear();
-        let Some(dir) = Self::plugins_dir() else {
-            return;
-        };
+        self.infos = plugins::list();
+        self.state.registered_commands.lock().unwrap().clear();
+        self.state.status_items.lock().unwrap().clear();
 
-        if !dir.exists() {
-            let _ = fs::create_dir_all(&dir);
-            return;
-        }
-
-        let Ok(entries) = fs::read_dir(&dir) else {
-            return;
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("wasm") {
-                let name = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("plugin")
-                    .to_string();
-
-                if let Ok(wasm_bytes) = fs::read(&path) {
-                    let manifest = Manifest::new([Wasm::data(wasm_bytes)]);
-
-                    let f_slice = Function::new(
-                        "ocean_get_buffer_slice",
-                        [ValType::I64, ValType::I64],
-                        [ValType::I64],
-                        UserData::new(self.state.clone()),
-                        ocean_get_buffer_slice,
-                    );
-
-                    let f_insert = Function::new(
-                        "ocean_insert_text",
-                        [ValType::I64, ValType::I64],
-                        [],
-                        UserData::new(self.state.clone()),
-                        ocean_insert_text,
-                    );
-
-                    let f_cmd = Function::new(
-                        "ocean_register_command",
-                        [ValType::I64, ValType::I64],
-                        [],
-                        UserData::new(self.state.clone()),
-                        ocean_register_command,
-                    );
-
-                    let f_status = Function::new(
-                        "ocean_add_status_item",
-                        [ValType::I64],
-                        [],
-                        UserData::new(self.state.clone()),
-                        ocean_add_status_item,
-                    );
-
-                    let builder = PluginBuilder::new(manifest)
-                        .with_wasi(true)
-                        .with_functions([f_slice, f_insert, f_cmd, f_status]);
-
-                    if let Ok(mut plugin) = builder.build() {
-                        if plugin.function_exists("_start") {
-                            let _ = plugin.call::<(), ()>("_start", ());
-                        }
-                        if plugin.function_exists("init") {
-                            let _ = plugin.call::<(), ()>("init", ());
-                        }
-                        self.plugins.push(LoadedPlugin { name, path, plugin });
-                    }
-                }
+        for info in &self.infos {
+            if !info.enabled {
+                continue;
             }
+            let Ok(wasm_bytes) = fs::read(&info.path) else {
+                continue;
+            };
+            self.state.registered_commands.lock().unwrap().clear();
+            self.state.status_items.lock().unwrap().clear();
+
+            let manifest = Manifest::new([Wasm::data(wasm_bytes)]);
+            let f_slice = Function::new(
+                "ocean_get_buffer_slice",
+                [ValType::I64, ValType::I64],
+                [ValType::I64],
+                UserData::new(self.state.clone()),
+                ocean_get_buffer_slice,
+            );
+            let f_insert = Function::new(
+                "ocean_insert_text",
+                [ValType::I64, ValType::I64],
+                [],
+                UserData::new(self.state.clone()),
+                ocean_insert_text,
+            );
+            let f_cmd = Function::new(
+                "ocean_register_command",
+                [ValType::I64, ValType::I64],
+                [],
+                UserData::new(self.state.clone()),
+                ocean_register_command,
+            );
+            let f_status = Function::new(
+                "ocean_add_status_item",
+                [ValType::I64],
+                [],
+                UserData::new(self.state.clone()),
+                ocean_add_status_item,
+            );
+
+            let builder = PluginBuilder::new(manifest)
+                .with_wasi(true)
+                .with_functions([f_slice, f_insert, f_cmd, f_status]);
+
+            let Ok(mut plugin) = builder.build() else {
+                continue;
+            };
+            if plugin.function_exists("_start") {
+                let _ = plugin.call::<(), ()>("_start", ());
+            }
+            if plugin.function_exists("init") {
+                let _ = plugin.call::<(), ()>("init", ());
+            }
+
+            let commands = std::mem::take(&mut *self.state.registered_commands.lock().unwrap());
+            let status_items = std::mem::take(&mut *self.state.status_items.lock().unwrap());
+            self.plugins.push(LoadedPlugin {
+                name: info.id.clone(),
+                path: info.path.clone(),
+                plugin,
+                commands,
+                status_items,
+                manifest: plugins::load_manifest(&info.id),
+            });
         }
     }
 
@@ -167,13 +177,21 @@ impl PluginEngine {
     }
 
     pub fn status_items(&self) -> Vec<String> {
-        let items = self.state.status_items.lock().unwrap();
-        items.clone()
+        self.plugins
+            .iter()
+            .flat_map(|plugin| plugin.status_items.iter().cloned())
+            .collect()
     }
 
-    pub fn registered_commands(&self) -> Vec<(String, String)> {
-        let cmds = self.state.registered_commands.lock().unwrap();
-        cmds.clone()
+    pub fn registered_commands(&self) -> Vec<(String, String, String)> {
+        self.plugins
+            .iter()
+            .flat_map(|plugin| {
+                plugin.commands.iter().map(move |(title, callback)| {
+                    (plugin.name.clone(), title.clone(), callback.clone())
+                })
+            })
+            .collect()
     }
 
     pub fn execute_command(

@@ -4,6 +4,7 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 
 use crate::font::FontSystem;
+use crate::renderer::icons::{self, IconId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AtlasKey {
@@ -12,6 +13,12 @@ pub struct AtlasKey {
     /// Font size in 1/16ths of a pixel
     pub size_q4: u16,
     pub thicken: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImageKey {
+    pub id: u16,
+    pub px: u16,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,6 +41,7 @@ pub struct GlyphAtlas {
     pub height: u32,
     pub pixels: Vec<u8>,
     entries: FxHashMap<AtlasKey, AtlasEntry>,
+    image_entries: FxHashMap<ImageKey, AtlasEntry>,
     scale_ctx: ScaleContext,
     cursor_x: u32,
     cursor_y: u32,
@@ -50,6 +58,7 @@ impl GlyphAtlas {
             height: sz,
             pixels: vec![0u8; (sz * sz * 4) as usize],
             entries: FxHashMap::with_capacity_and_hasher(1024, Default::default()),
+            image_entries: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             scale_ctx: ScaleContext::new(),
             cursor_x: 1,
             cursor_y: 1,
@@ -62,6 +71,7 @@ impl GlyphAtlas {
     pub fn clear(&mut self) {
         self.pixels.fill(0);
         self.entries.clear();
+        self.image_entries.clear();
         self.cursor_x = 1;
         self.cursor_y = 1;
         self.row_height = 0;
@@ -203,6 +213,79 @@ impl GlyphAtlas {
         entry
     }
 
+    pub fn get_or_insert_icon(&mut self, icon: IconId, px: u32) -> AtlasEntry {
+        let px = if px >= 32 { 32 } else { 16 };
+        let key = ImageKey {
+            id: icon as u16,
+            px: px as u16,
+        };
+        if let Some(&entry) = self.image_entries.get(&key) {
+            return entry;
+        }
+
+        let Some(bytes) = icon.bytes(px) else {
+            return AtlasEntry {
+                uv_x: 0.0,
+                uv_y: 0.0,
+                uv_w: 0.0,
+                uv_h: 0.0,
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                is_color: false,
+                atlas_x: 0,
+                atlas_y: 0,
+            };
+        };
+        let Some((w, h, rgba)) = icons::decode_png(bytes) else {
+            return AtlasEntry {
+                uv_x: 0.0,
+                uv_y: 0.0,
+                uv_w: 0.0,
+                uv_h: 0.0,
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                is_color: false,
+                atlas_x: 0,
+                atlas_y: 0,
+            };
+        };
+
+        let (ax, ay) = self.alloc_rect(w, h);
+        for row in 0..h {
+            let src = (row * w * 4) as usize;
+            let dst = (((ay + row) * self.width + ax) * 4) as usize;
+            let len = (w * 4) as usize;
+            if src + len <= rgba.len() && dst + len <= self.pixels.len() {
+                self.pixels[dst..dst + len].copy_from_slice(&rgba[src..src + len]);
+            }
+        }
+
+        let entry = AtlasEntry {
+            uv_x: ax as f32 / self.width as f32,
+            uv_y: ay as f32 / self.height as f32,
+            uv_w: w as f32 / self.width as f32,
+            uv_h: h as f32 / self.height as f32,
+            left: 0,
+            top: 0,
+            width: w,
+            height: h,
+            is_color: icon.is_color(),
+            atlas_x: ax,
+            atlas_y: ay,
+        };
+        self.image_entries.insert(key, entry);
+        self.mark_dirty(ay, ay + h);
+        entry
+    }
+
+    pub fn image_entry_count(&self) -> usize {
+        self.image_entries.len()
+    }
+
     fn alloc_rect(&mut self, w: u32, h: u32) -> (u32, u32) {
         let padded_w = w + 2;
         let padded_h = h + 2;
@@ -244,6 +327,14 @@ impl GlyphAtlas {
         self.height = new_h;
         self.pixels = new_pixels;
         for entry in self.entries.values_mut() {
+            if entry.width > 0 {
+                entry.uv_x = entry.atlas_x as f32 / new_w as f32;
+                entry.uv_y = entry.atlas_y as f32 / new_h as f32;
+                entry.uv_w = entry.width as f32 / new_w as f32;
+                entry.uv_h = entry.height as f32 / new_h as f32;
+            }
+        }
+        for entry in self.image_entries.values_mut() {
             if entry.width > 0 {
                 entry.uv_x = entry.atlas_x as f32 / new_w as f32;
                 entry.uv_y = entry.atlas_y as f32 / new_h as f32;

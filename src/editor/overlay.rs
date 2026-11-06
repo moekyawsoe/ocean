@@ -54,7 +54,11 @@ impl CommandPalette {
         }
     }
 
-    pub fn populate_items(&mut self, workspace_dir: &Path, plugin_commands: &[(String, String)]) {
+    pub fn populate_items(
+        &mut self,
+        workspace_dir: &Path,
+        plugin_commands: &[(String, String, String)],
+    ) {
         self.all_items.clear();
 
         // Built-in editor actions
@@ -115,11 +119,11 @@ impl CommandPalette {
         });
 
         // Add plugin commands
-        for (name, callback) in plugin_commands {
+        for (plugin, title, callback) in plugin_commands {
             self.all_items.push(PaletteItem {
-                title: format!("Plugin: {name}"),
-                description: format!("Execute WASM function `{callback}`"),
-                action: PaletteAction::RunPluginCommand("plugin".to_string(), callback.clone()),
+                title: format!("Plugin: {title}"),
+                description: format!("{plugin} — execute `{callback}`"),
+                action: PaletteAction::RunPluginCommand(plugin.clone(), callback.clone()),
             });
         }
 

@@ -10,6 +10,7 @@ use crate::editor::vim::{VimMode, VimState};
 use crate::font::{FontStyle, FontSystem};
 use crate::renderer::QuadInstance;
 use crate::renderer::atlas::GlyphAtlas;
+use crate::renderer::icons::{self, IconId};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EditorViewport {
@@ -47,32 +48,52 @@ impl EditorView {
         scrollbar_dragging: bool,
         scrollbar_hovered: bool,
         problems: &[crate::editor::ProblemEntry],
+        plugins: &[crate::plugins::PluginInfo],
+        search: &crate::editor::WorkspaceSearch,
         active_panel: crate::editor::SidebarPanel,
         activity_bar_visible: bool,
         vim: Option<&VimState>,
         ime_preedit: Option<&str>,
+        ui_scale: f32,
+        menu_height: f32,
     ) {
+        let ui = ui_scale.max(0.5);
         if raw_vp.w <= 10.0 || raw_vp.h <= 10.0 {
             return;
         }
+        let menu_height = menu_height.clamp(0.0, (raw_vp.h - 20.0).max(0.0));
+        let body_vp = EditorViewport {
+            x: raw_vp.x,
+            y: raw_vp.y + menu_height,
+            w: raw_vp.w,
+            h: (raw_vp.h - menu_height).max(10.0),
+        };
+        let raw_vp = &body_vp;
 
         let theme = &config.colors;
         let line_h = font_sys.metrics.cell_height;
         let cell_w = font_sys.metrics.cell_width;
         let baseline = font_sys.metrics.baseline;
 
-        let activity_w = if activity_bar_visible { 44.0 } else { 0.0 };
+        let activity_w = if activity_bar_visible { 44.0 * ui } else { 0.0 };
         let mut panel_open = false;
         let mut sidebar_w = 0.0;
 
         if let Some(exp) = explorer {
             panel_open = exp.visible
-                && (active_panel == crate::editor::SidebarPanel::Problems || exp.is_open());
+                && (active_panel != crate::editor::SidebarPanel::Explorer || exp.is_open());
             if panel_open {
-                sidebar_w = if active_panel == crate::editor::SidebarPanel::Problems {
-                    exp.width.max(230.0).min((raw_vp.w - 160.0).max(80.0))
-                } else {
-                    exp.width.min(raw_vp.w - 100.0).max(80.0)
+                sidebar_w = match active_panel {
+                    crate::editor::SidebarPanel::Search => {
+                        exp.width.max(280.0).min((raw_vp.w - 160.0).max(80.0))
+                    }
+                    crate::editor::SidebarPanel::Problems
+                    | crate::editor::SidebarPanel::Plugins => {
+                        exp.width.max(240.0).min((raw_vp.w - 160.0).max(80.0))
+                    }
+                    crate::editor::SidebarPanel::Explorer => {
+                        exp.width.min(raw_vp.w - 100.0).max(80.0)
+                    }
                 };
             }
         }
@@ -87,6 +108,7 @@ impl EditorView {
                 raw_vp,
                 activity_w,
                 active_panel,
+                ui,
             );
         }
 
@@ -106,6 +128,7 @@ impl EditorView {
                             raw_vp.y,
                             sidebar_w,
                             raw_vp.h,
+                            ui,
                         );
                     }
                 }
@@ -123,6 +146,41 @@ impl EditorView {
                         raw_vp.h,
                         line_h,
                         baseline,
+                        ui,
+                    );
+                }
+                crate::editor::SidebarPanel::Search => {
+                    Self::emit_search(
+                        config,
+                        font_sys,
+                        atlas,
+                        bg_instances,
+                        fg_instances,
+                        search,
+                        sidebar_x,
+                        raw_vp.y,
+                        sidebar_w,
+                        raw_vp.h,
+                        line_h,
+                        baseline,
+                        ui,
+                    );
+                }
+                crate::editor::SidebarPanel::Plugins => {
+                    Self::emit_plugins(
+                        config,
+                        font_sys,
+                        atlas,
+                        bg_instances,
+                        fg_instances,
+                        plugins,
+                        sidebar_x,
+                        raw_vp.y,
+                        sidebar_w,
+                        raw_vp.h,
+                        line_h,
+                        baseline,
+                        ui,
                     );
                 }
             }
@@ -168,7 +226,7 @@ impl EditorView {
         let tab_w = (180.0_f32)
             .min((vp.w - 40.0) / doc_titles.len().max(1) as f32)
             .max(60.0);
-        let max_title_chars = (((tab_w - 34.0) / cell_w).floor() as usize).max(4);
+        let max_title_chars = (((tab_w - 48.0 * ui) / cell_w).floor() as usize).max(4);
 
         for (idx, (name, is_dirty)) in doc_titles.iter().enumerate() {
             let is_active = idx == active_doc_idx;
@@ -196,6 +254,19 @@ impl EditorView {
                 ));
             }
 
+            let icon_size = 13.0 * ui;
+            icons::emit(
+                atlas,
+                fg_instances,
+                icons::file_icon_for_name(name),
+                tab_x + 7.0 * ui,
+                vp.y + (tab_h - icon_size) * 0.5,
+                icon_size,
+                theme
+                    .foreground
+                    .to_f32_rgba(if is_active { 0.95 } else { 0.55 }),
+            );
+
             let title: String = name.chars().take(max_title_chars).collect();
             emit_simple_string(
                 config,
@@ -203,7 +274,7 @@ impl EditorView {
                 atlas,
                 fg_instances,
                 &title,
-                tab_x + 8.0,
+                tab_x + 24.0 * ui,
                 vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
                 if is_active {
                     theme.foreground.to_f32_rgba(1.0)
@@ -213,50 +284,49 @@ impl EditorView {
             );
 
             if *is_dirty {
-                fg_instances.push(QuadInstance::solid(
-                    tab_x + tab_w - 26.0,
-                    vp.y + (tab_h - 5.0) * 0.5,
-                    5.0,
-                    5.0,
+                icons::emit(
+                    atlas,
+                    fg_instances,
+                    IconId::Dirty,
+                    tab_x + tab_w - 31.0 * ui,
+                    vp.y + (tab_h - 7.0 * ui) * 0.5,
+                    7.0 * ui,
                     theme.ansi[3].to_f32_rgba(0.95),
-                ));
+                );
             }
 
-            emit_simple_string(
-                config,
-                font_sys,
+            icons::emit(
                 atlas,
                 fg_instances,
-                "x",
-                tab_x + tab_w - 14.0,
-                vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
-                if is_active {
-                    theme.foreground.to_f32_rgba(0.75)
-                } else {
-                    theme.foreground.to_f32_rgba(0.35)
-                },
+                IconId::Close,
+                tab_x + tab_w - 17.0 * ui,
+                vp.y + (tab_h - 11.0 * ui) * 0.5,
+                11.0 * ui,
+                theme
+                    .foreground
+                    .to_f32_rgba(if is_active { 0.72 } else { 0.32 }),
             );
 
             tab_x += tab_w + 4.0;
         }
 
         // New tab button
-        if tab_x + 22.0 < vp.x + vp.w - 8.0 {
+        if tab_x + 22.0 * ui < vp.x + vp.w - 8.0 {
+            let button_w = tab_h - 4.0 * ui;
             bg_instances.push(QuadInstance::solid(
                 tab_x,
-                vp.y + 3.0,
-                tab_h - 4.0,
-                tab_h - 5.0,
+                vp.y + 3.0 * ui,
+                button_w,
+                tab_h - 5.0 * ui,
                 theme.foreground.to_f32_rgba(0.06),
             ));
-            emit_simple_string(
-                config,
-                font_sys,
+            icons::emit(
                 atlas,
                 fg_instances,
-                "+",
-                tab_x + cell_w * 0.7,
-                vp.y + 2.0 + (tab_h - line_h) * 0.5 + baseline,
+                IconId::Plus,
+                tab_x + (button_w - 11.0 * ui) * 0.5,
+                vp.y + (tab_h - 11.0 * ui) * 0.5,
+                11.0 * ui,
                 theme.foreground.to_f32_rgba(0.65),
             );
         }
@@ -302,13 +372,23 @@ impl EditorView {
                     .join(" > ")
             };
 
+            let crumb_icon = icons::file_icon_for_name(&doc.file_name());
+            icons::emit(
+                atlas,
+                fg_instances,
+                crumb_icon,
+                vp.x + 8.0 * ui,
+                crumb_y + (crumb_h - 12.0 * ui) * 0.5,
+                12.0 * ui,
+                theme.foreground.to_f32_rgba(0.65),
+            );
             emit_simple_string(
                 config,
                 font_sys,
                 atlas,
                 fg_instances,
                 &crumbs,
-                vp.x + 8.0,
+                vp.x + 25.0 * ui,
                 crumb_y + (crumb_h - line_h) * 0.5 + baseline,
                 theme.foreground.to_f32_rgba(0.62),
             );
@@ -395,6 +475,9 @@ impl EditorView {
             doc.language.display_name(),
             lsp_status.unwrap_or("LSP: Idle"),
         );
+        if doc.caret_count() > 1 {
+            right_info.push_str(&format!("  |  {} cursors", doc.caret_count()));
+        }
         for item in plugin_status_items {
             right_info.push_str(&format!("  |  {item}"));
         }
@@ -509,17 +592,20 @@ impl EditorView {
 
             // Diagnostic marker in gutter (dot if error/warning)
             if let Some(diag) = diagnostics.iter().find(|d| d.start_line == line_idx) {
-                let dot_col = match diag.severity {
-                    lsp_types::DiagnosticSeverity::ERROR => theme.ansi[1].to_f32_rgba(1.0),
-                    _ => theme.ansi[3].to_f32_rgba(1.0),
+                let (icon, dot_col) = match diag.severity {
+                    lsp_types::DiagnosticSeverity::ERROR => (IconId::Error, theme.ansi[1]),
+                    lsp_types::DiagnosticSeverity::WARNING => (IconId::Warning, theme.ansi[3]),
+                    _ => (IconId::Info, theme.ansi[4]),
                 };
-                fg_instances.push(QuadInstance::solid(
-                    vp.x + 2.0,
-                    row_y + (line_h - 6.0) * 0.5,
-                    4.0,
-                    6.0,
-                    dot_col,
-                ));
+                icons::emit(
+                    atlas,
+                    fg_instances,
+                    icon,
+                    vp.x + 1.0 * ui,
+                    row_y + (line_h - 10.0 * ui) * 0.5,
+                    10.0 * ui,
+                    dot_col.to_f32_rgba(1.0),
+                );
             }
 
             let line_text = doc.buffer.line_without_newline(line_idx);
@@ -703,6 +789,25 @@ impl EditorView {
                 ));
             }
         }
+        if is_focused {
+            for caret in doc.extra_cursors.clone() {
+                if caret.line < start_line || caret.line >= end_line {
+                    continue;
+                }
+                let row_y = content_y + (caret.line - start_line) as f32 * line_h;
+                let shaped = doc.shaped_line(caret.line, font_sys);
+                let cx = text_area_x - scroll_x + shaped.visual_x_for_cluster(caret.cluster_idx);
+                if cx >= text_area_x && cx <= scrollbar_x {
+                    fg_instances.push(QuadInstance::solid(
+                        cx.round(),
+                        row_y,
+                        2.0,
+                        line_h,
+                        theme.cursor_color.to_f32_rgba(0.7),
+                    ));
+                }
+            }
+        }
 
         // 5a. IME preedit composition anchored at the editor caret
         if let Some(preedit) = ime_preedit
@@ -853,6 +958,7 @@ impl EditorView {
         vp: &EditorViewport,
         width: f32,
         active_panel: crate::editor::SidebarPanel,
+        ui: f32,
     ) {
         let theme = &config.colors;
         let line_h = font_sys.metrics.cell_height;
@@ -874,25 +980,36 @@ impl EditorView {
         ));
 
         let active_explorer = active_panel == crate::editor::SidebarPanel::Explorer;
+        let active_search = active_panel == crate::editor::SidebarPanel::Search;
         let active_problems = active_panel == crate::editor::SidebarPanel::Problems;
+        let active_plugins = active_panel == crate::editor::SidebarPanel::Plugins;
 
-        for index in 0..3 {
-            let cy = vp.y + 14.0 + index as f32 * 44.0;
-            let is_active = (index == 0 && active_explorer) || (index == 1 && active_problems);
+        let items = [
+            IconId::Explorer,
+            IconId::Search,
+            IconId::Problems,
+            IconId::Plugins,
+        ];
+        for (index, icon) in items.iter().enumerate() {
+            let cy = vp.y + 13.0 * ui + index as f32 * 44.0 * ui;
+            let is_active = (index == 0 && active_explorer)
+                || (index == 1 && active_search)
+                || (index == 2 && active_problems)
+                || (index == 3 && active_plugins);
 
             if is_active {
                 bg_instances.push(QuadInstance::solid(
                     vp.x,
-                    cy - 4.0,
+                    cy - 5.0 * ui,
                     width,
-                    28.0,
+                    28.0 * ui,
                     theme.selection_background.to_f32_rgba(0.30),
                 ));
                 fg_instances.push(QuadInstance::solid(
                     vp.x,
-                    cy - 4.0,
-                    2.0,
-                    28.0,
+                    cy - 5.0 * ui,
+                    2.0 * ui,
+                    28.0 * ui,
                     theme.cursor_color.to_f32_rgba(1.0),
                 ));
             }
@@ -900,40 +1017,17 @@ impl EditorView {
             let icon_color = theme
                 .foreground
                 .to_f32_rgba(if is_active { 0.95 } else { 0.55 });
-            let ix = vp.x + 12.0;
-
-            match index {
-                0 => {
-                    fg_instances.push(QuadInstance::hollow(ix, cy, 20.0, 15.0, icon_color));
-                    fg_instances.push(QuadInstance::solid(ix, cy, 9.0, 3.0, icon_color));
-                }
-                1 => {
-                    fg_instances.push(QuadInstance::hollow(ix, cy, 20.0, 18.0, icon_color));
-                    emit_simple_string(
-                        config,
-                        font_sys,
-                        atlas,
-                        fg_instances,
-                        "!",
-                        ix + 7.0,
-                        cy + baseline + 3.0,
-                        icon_color,
-                    );
-                }
-                _ => {
-                    fg_instances.push(QuadInstance::hollow(ix + 1.0, cy, 14.0, 14.0, icon_color));
-                    fg_instances.push(QuadInstance::solid(
-                        ix + 12.0,
-                        cy + 12.0,
-                        8.0,
-                        2.0,
-                        icon_color,
-                    ));
-                }
-            }
-
-            let _ = line_h;
+            icons::emit(
+                atlas,
+                fg_instances,
+                *icon,
+                vp.x + 13.0 * ui,
+                cy,
+                18.0 * ui,
+                icon_color,
+            );
         }
+        let _ = (line_h, baseline);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -950,6 +1044,7 @@ impl EditorView {
         height: f32,
         line_h: f32,
         baseline: f32,
+        ui: f32,
     ) {
         let theme = &config.colors;
         let cell_w = font_sys.metrics.cell_width;
@@ -994,18 +1089,20 @@ impl EditorView {
 
         for (index, problem) in problems.iter().take(visible_rows).enumerate() {
             let row_y = y + header_h + index as f32 * item_h;
-            let color = match problem.severity {
-                lsp_types::DiagnosticSeverity::ERROR => theme.ansi[1].to_f32_rgba(1.0),
-                lsp_types::DiagnosticSeverity::WARNING => theme.ansi[3].to_f32_rgba(1.0),
-                _ => theme.ansi[4].to_f32_rgba(1.0),
+            let (icon, color) = match problem.severity {
+                lsp_types::DiagnosticSeverity::ERROR => (IconId::Error, theme.ansi[1]),
+                lsp_types::DiagnosticSeverity::WARNING => (IconId::Warning, theme.ansi[3]),
+                _ => (IconId::Info, theme.ansi[4]),
             };
-            fg_instances.push(QuadInstance::solid(
-                x + 8.0,
-                row_y + (item_h - 6.0) * 0.5,
-                6.0,
-                6.0,
-                color,
-            ));
+            icons::emit(
+                atlas,
+                fg_instances,
+                icon,
+                x + 7.0 * ui,
+                row_y + (item_h - 10.0 * ui) * 0.5,
+                10.0 * ui,
+                color.to_f32_rgba(1.0),
+            );
 
             let label = format!(
                 "{}:{}  {}",
@@ -1027,6 +1124,312 @@ impl EditorView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn emit_search(
+        config: &Config,
+        font_sys: &mut FontSystem,
+        atlas: &mut GlyphAtlas,
+        bg_instances: &mut Vec<QuadInstance>,
+        fg_instances: &mut Vec<QuadInstance>,
+        search: &crate::editor::WorkspaceSearch,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        line_h: f32,
+        baseline: f32,
+        ui: f32,
+    ) {
+        let theme = &config.colors;
+        let cell_w = font_sys.metrics.cell_width;
+        let header_h = (line_h + 6.0).round();
+        let field_h = (line_h + 4.0).round();
+        let item_h = (line_h + 3.0).round();
+        let field_baseline = |row_y: f32| row_y + (field_h - line_h) * 0.5 + baseline;
+
+        bg_instances.push(QuadInstance::solid(
+            x,
+            y,
+            width,
+            height,
+            theme.background.to_f32_rgba(0.97),
+        ));
+        fg_instances.push(QuadInstance::solid(
+            x + width - 1.0,
+            y,
+            1.0,
+            height,
+            theme.foreground.to_f32_rgba(0.12),
+        ));
+        bg_instances.push(QuadInstance::solid(
+            x,
+            y,
+            width,
+            header_h,
+            theme.selection_background.to_f32_rgba(0.20),
+        ));
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            &format!("SEARCH ({})", search.results.len()),
+            x + 10.0,
+            y + (header_h - line_h) * 0.5 + baseline,
+            theme.ansi[4].to_f32_rgba(1.0),
+        );
+
+        let max_chars = ((width - 20.0 * ui) / cell_w).floor().max(6.0) as usize;
+        let query_y = y + header_h;
+        let replace_y = query_y + field_h;
+        let options_y = replace_y + field_h;
+
+        if search.field == 0 && search.active {
+            bg_instances.push(QuadInstance::solid(
+                x,
+                query_y,
+                width,
+                field_h,
+                theme.selection_background.to_f32_rgba(0.28),
+            ));
+        }
+        if search.field == 1 && search.active {
+            bg_instances.push(QuadInstance::solid(
+                x,
+                replace_y,
+                width,
+                field_h,
+                theme.selection_background.to_f32_rgba(0.28),
+            ));
+        }
+
+        let query_label = format!(
+            "Find: {}{}",
+            search.query,
+            if search.field == 0 && search.active {
+                "|"
+            } else {
+                ""
+            }
+        );
+        let query_label: String = query_label.chars().take(max_chars).collect();
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            &query_label,
+            x + 8.0,
+            field_baseline(query_y),
+            theme.foreground.to_f32_rgba(0.90),
+        );
+
+        let replace_label = format!(
+            "Replace: {}{}",
+            search.replace,
+            if search.field == 1 && search.active {
+                "|"
+            } else {
+                ""
+            }
+        );
+        let replace_label: String = replace_label.chars().take(max_chars).collect();
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            &replace_label,
+            x + 8.0,
+            field_baseline(replace_y),
+            theme.foreground.to_f32_rgba(0.78),
+        );
+
+        let case_color = if search.case_sensitive {
+            theme.ansi[2].to_f32_rgba(1.0)
+        } else {
+            theme.foreground.to_f32_rgba(0.45)
+        };
+        let word_color = if search.whole_word {
+            theme.ansi[2].to_f32_rgba(1.0)
+        } else {
+            theme.foreground.to_f32_rgba(0.45)
+        };
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "[Aa]",
+            x + 8.0,
+            field_baseline(options_y),
+            case_color,
+        );
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "[W]",
+            x + 46.0,
+            field_baseline(options_y),
+            word_color,
+        );
+
+        let results_y = options_y + field_h;
+        let visible_rows = ((height - (results_y - y) - field_h) / item_h)
+            .floor()
+            .max(0.0) as usize;
+        for (index, hit) in search.results.iter().take(visible_rows).enumerate() {
+            let row_y = results_y + index as f32 * item_h;
+            if index == search.selected {
+                bg_instances.push(QuadInstance::solid(
+                    x,
+                    row_y,
+                    width,
+                    item_h,
+                    theme.selection_background.to_f32_rgba(0.32),
+                ));
+            }
+            let file = hit
+                .path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("?");
+            let label = format!("{}:{}  {}", file, hit.line + 1, hit.preview);
+            let label: String = label.chars().take(max_chars).collect();
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg_instances,
+                &label,
+                x + 8.0,
+                row_y + (item_h - line_h) * 0.5 + baseline,
+                theme.foreground.to_f32_rgba(0.76),
+            );
+        }
+
+        let message = search
+            .message
+            .as_deref()
+            .unwrap_or("Enter search · Tab field · Ctrl+Enter replace all");
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            message,
+            x + 8.0,
+            y + height - (line_h + 3.0 * ui),
+            theme.foreground.to_f32_rgba(0.44),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_plugins(
+        config: &Config,
+        font_sys: &mut FontSystem,
+        atlas: &mut GlyphAtlas,
+        bg_instances: &mut Vec<QuadInstance>,
+        fg_instances: &mut Vec<QuadInstance>,
+        plugins: &[crate::plugins::PluginInfo],
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        line_h: f32,
+        baseline: f32,
+        ui: f32,
+    ) {
+        let theme = &config.colors;
+        let cell_w = font_sys.metrics.cell_width;
+        let header_h = (line_h + 6.0).round();
+        let item_h = (line_h + 4.0).round();
+
+        bg_instances.push(QuadInstance::solid(
+            x,
+            y,
+            width,
+            height,
+            theme.background.to_f32_rgba(0.97),
+        ));
+        fg_instances.push(QuadInstance::solid(
+            x + width - 1.0,
+            y,
+            1.0,
+            height,
+            theme.foreground.to_f32_rgba(0.12),
+        ));
+        bg_instances.push(QuadInstance::solid(
+            x,
+            y,
+            width,
+            header_h,
+            theme.selection_background.to_f32_rgba(0.20),
+        ));
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            &format!("PLUGINS ({})", plugins.len()),
+            x + 10.0,
+            y + (header_h - line_h) * 0.5 + baseline,
+            theme.ansi[4].to_f32_rgba(1.0),
+        );
+
+        let max_chars = ((width - 44.0 * ui) / cell_w).floor().max(6.0) as usize;
+        let visible_rows = ((height - header_h - item_h) / item_h).floor().max(0.0) as usize;
+
+        for (index, plugin) in plugins.iter().take(visible_rows).enumerate() {
+            let row_y = y + header_h + index as f32 * item_h;
+            let color = if plugin.enabled {
+                theme.ansi[2]
+            } else {
+                theme.foreground
+            };
+            icons::emit(
+                atlas,
+                fg_instances,
+                IconId::Plugins,
+                x + 7.0 * ui,
+                row_y + (item_h - 12.0 * ui) * 0.5,
+                12.0 * ui,
+                color.to_f32_rgba(if plugin.enabled { 0.95 } else { 0.42 }),
+            );
+            let version = if plugin.version.is_empty() {
+                String::new()
+            } else {
+                format!("v{}", plugin.version)
+            };
+            let state = if plugin.enabled { "on" } else { "off" };
+            let label = format!("{}  {}  [{}]", plugin.name, version, state);
+            let label: String = label.chars().take(max_chars).collect();
+            emit_simple_string(
+                config,
+                font_sys,
+                atlas,
+                fg_instances,
+                &label,
+                x + 24.0 * ui,
+                row_y + (item_h - line_h) * 0.5 + baseline,
+                color.to_f32_rgba(if plugin.enabled { 0.88 } else { 0.48 }),
+            );
+        }
+
+        emit_simple_string(
+            config,
+            font_sys,
+            atlas,
+            fg_instances,
+            "ocean +plugin-install <path|url>",
+            x + 8.0 * ui,
+            y + height - (line_h + 4.0 * ui),
+            theme.foreground.to_f32_rgba(0.40),
+        );
+    }
+
     fn emit_sidebar(
         config: &Config,
         font_sys: &mut FontSystem,
@@ -1038,6 +1441,7 @@ impl EditorView {
         sy: f32,
         sw: f32,
         sh: f32,
+        ui: f32,
     ) {
         let theme = &config.colors;
         let line_h = font_sys.metrics.cell_height;
@@ -1139,16 +1543,36 @@ impl EditorView {
                 ));
             }
 
-            let indent_px = (entry.depth as f32 * 12.0).min(sw - 40.0);
-            let prefix = if entry.is_dir {
-                if entry.is_expanded { "v " } else { "> " }
-            } else {
-                "  "
-            };
+            let indent_px = (entry.depth as f32 * 12.0 * ui).min(sw - 40.0);
+            let icon_size = 12.0 * ui;
 
-            let label = format!("{}{}", prefix, entry.name);
-            let max_chars = ((sw - 12.0 - indent_px) / cell_w).floor().max(1.0) as usize;
-            let truncated: String = label.chars().take(max_chars).collect();
+            if entry.is_dir {
+                icons::emit(
+                    atlas,
+                    fg_instances,
+                    if entry.is_expanded {
+                        IconId::ChevronDown
+                    } else {
+                        IconId::ChevronRight
+                    },
+                    sx + 5.0 * ui + indent_px,
+                    item_y + (item_h - 9.0 * ui) * 0.5,
+                    9.0 * ui,
+                    theme.foreground.to_f32_rgba(0.55),
+                );
+            }
+            icons::emit(
+                atlas,
+                fg_instances,
+                icons::file_icon_for(&entry.path, entry.is_dir, entry.is_expanded),
+                sx + 15.0 * ui + indent_px,
+                item_y + (item_h - icon_size) * 0.5,
+                icon_size,
+                theme.foreground.to_f32_rgba(0.9),
+            );
+
+            let max_chars = ((sw - 30.0 * ui - indent_px) / cell_w).floor().max(1.0) as usize;
+            let truncated: String = entry.name.chars().take(max_chars).collect();
 
             let item_baseline = item_y + (item_h - line_h) * 0.5 + baseline;
             let text_color = if entry.is_dir {
@@ -1165,7 +1589,7 @@ impl EditorView {
                 atlas,
                 fg_instances,
                 &truncated,
-                sx + 6.0 + indent_px,
+                sx + 30.0 * ui + indent_px,
                 item_baseline,
                 text_color,
             );

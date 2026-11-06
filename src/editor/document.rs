@@ -47,6 +47,7 @@ pub struct CachedLine {
 pub struct EditorDocument {
     pub buffer: TextBuffer,
     pub cursor: Cursor,
+    pub extra_cursors: Vec<Cursor>,
     pub selection_anchor: Option<Cursor>,
     pub selection_kind: SelectionKind,
     pub scroll_y: usize,
@@ -69,6 +70,7 @@ impl EditorDocument {
         Self {
             buffer: TextBuffer::new(),
             cursor: Cursor::new(0, 0),
+            extra_cursors: Vec::new(),
             selection_anchor: None,
             selection_kind: SelectionKind::Char,
             scroll_y: 0,
@@ -86,6 +88,7 @@ impl EditorDocument {
         Ok(Self {
             buffer,
             cursor: Cursor::new(0, 0),
+            extra_cursors: Vec::new(),
             selection_anchor: None,
             selection_kind: SelectionKind::Char,
             scroll_y: 0,
@@ -95,6 +98,29 @@ impl EditorDocument {
             scroll_to_cursor_requested: true,
             line_cache: HashMap::new(),
         })
+    }
+
+    pub fn from_text(text: &str, path: Option<PathBuf>, dirty: bool) -> Self {
+        let language = path
+            .as_ref()
+            .map(Language::from_path)
+            .unwrap_or(Language::Plain);
+        let mut buffer = TextBuffer::from_str(text);
+        buffer.path = path;
+        buffer.dirty = dirty;
+        Self {
+            buffer,
+            cursor: Cursor::new(0, 0),
+            extra_cursors: Vec::new(),
+            selection_anchor: None,
+            selection_kind: SelectionKind::Char,
+            scroll_y: 0,
+            scroll_x: 0.0,
+            language,
+            syntax: SyntaxHighlighter::new(language),
+            scroll_to_cursor_requested: true,
+            line_cache: HashMap::new(),
+        }
     }
 
     pub fn file_name(&self) -> String {
@@ -256,6 +282,331 @@ impl EditorDocument {
         self.cursor.preferred_visual_x = None;
         self.selection_anchor = None;
         self.scroll_to_cursor_requested = true;
+    }
+
+    pub fn caret_count(&self) -> usize {
+        1 + self.extra_cursors.len()
+    }
+
+    pub fn clear_extra_cursors(&mut self) {
+        self.extra_cursors.clear();
+    }
+
+    pub fn add_caret_at(&mut self, line: usize, cluster: usize) {
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        if self.cursor.line == line && self.cursor.cluster_idx == cluster {
+            return;
+        }
+        if self
+            .extra_cursors
+            .iter()
+            .any(|caret| caret.line == line && caret.cluster_idx == cluster)
+        {
+            return;
+        }
+        self.extra_cursors.push(Cursor::new(line, cluster));
+    }
+
+    pub fn add_caret_vertical(&mut self, delta: isize, font_sys: &mut FontSystem) {
+        let target_line = self.cursor.line as isize + delta;
+        if target_line < 0 {
+            return;
+        }
+        let target_line = (target_line as usize).min(self.buffer.len_lines().saturating_sub(1));
+        let shaped = self.shaped_line(target_line, font_sys);
+        let cluster = self.cursor.cluster_idx.min(shaped.cluster_count());
+        self.add_caret_at(target_line, cluster);
+    }
+
+    fn caret_offset(&mut self, caret: Cursor, font_sys: &mut FontSystem) -> usize {
+        let line = caret.line.min(self.buffer.len_lines().saturating_sub(1));
+        let shaped = self.shaped_line(line, font_sys);
+        let char_col = shaped.cluster_to_char_idx(caret.cluster_idx);
+        self.buffer.line_col_to_char(line, char_col)
+    }
+
+    fn caret_from_offset(&mut self, offset: usize, font_sys: &mut FontSystem) -> Cursor {
+        let offset = offset.min(self.buffer.len_chars());
+        let (line, col) = self.buffer.char_to_line_col(offset);
+        let line = line.min(self.buffer.len_lines().saturating_sub(1));
+        let shaped = self.shaped_line(line, font_sys);
+        Cursor::new(line, shaped.char_to_cluster(col))
+    }
+
+    fn all_caret_offsets(&mut self, font_sys: &mut FontSystem) -> Vec<usize> {
+        let mut offsets = vec![self.cursor_char_offset(font_sys)];
+        let extras = self.extra_cursors.clone();
+        for caret in extras {
+            offsets.push(self.caret_offset(caret, font_sys));
+        }
+        offsets
+    }
+
+    fn apply_multi_offsets(
+        &mut self,
+        primary_offset: usize,
+        extra_offsets: Vec<usize>,
+        font_sys: &mut FontSystem,
+    ) {
+        self.cursor = self.caret_from_offset(primary_offset, font_sys);
+        self.cursor.preferred_visual_x = None;
+        self.extra_cursors = extra_offsets
+            .into_iter()
+            .map(|offset| self.caret_from_offset(offset, font_sys))
+            .collect();
+        self.scroll_to_cursor_requested = true;
+    }
+
+    pub fn insert_text_all(&mut self, text: &str, font_sys: &mut FontSystem) {
+        if self.extra_cursors.is_empty() {
+            self.insert_text(text, font_sys);
+            return;
+        }
+
+        let primary = self.cursor_char_offset(font_sys);
+        let mut offsets = self.all_caret_offsets(font_sys);
+        offsets.sort_unstable();
+        offsets.dedup();
+        let Some(primary_rank) = offsets.iter().position(|offset| *offset == primary) else {
+            self.insert_text(text, font_sys);
+            return;
+        };
+
+        self.selection_anchor = None;
+        self.extra_cursors.clear();
+        let text_chars = text.chars().count();
+        let before = (self.cursor.line, self.cursor.cluster_idx);
+        for offset in offsets.iter().rev() {
+            self.buffer.insert(*offset, text, before, before);
+        }
+
+        let new_offsets: Vec<usize> = offsets
+            .iter()
+            .enumerate()
+            .map(|(rank, offset)| offset + text_chars * (rank + 1))
+            .collect();
+        let primary_offset = new_offsets[primary_rank];
+        let extras: Vec<usize> = new_offsets
+            .into_iter()
+            .enumerate()
+            .filter(|(rank, _)| *rank != primary_rank)
+            .map(|(_, offset)| offset)
+            .collect();
+        self.apply_multi_offsets(primary_offset, extras, font_sys);
+    }
+
+    fn merge_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+        ranges.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in ranges {
+            if start >= end {
+                continue;
+            }
+            if let Some(last) = merged.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+                continue;
+            }
+            merged.push((start, end));
+        }
+        merged
+    }
+
+    fn offsets_after_deletions(offsets: &[usize], ranges: &[(usize, usize)]) -> Vec<usize> {
+        let mut adjusted = Vec::with_capacity(ranges.len());
+        let mut deleted = 0usize;
+        for (start, end) in ranges {
+            adjusted.push((*start, *end, start.saturating_sub(deleted)));
+            deleted += end - start;
+        }
+        offsets
+            .iter()
+            .map(|offset| {
+                if let Some((_, _, new_start)) = adjusted
+                    .iter()
+                    .find(|(start, end, _)| *offset >= *start && *offset < *end)
+                {
+                    *new_start
+                } else {
+                    let before: usize = adjusted
+                        .iter()
+                        .filter(|(_, end, _)| *end <= *offset)
+                        .map(|(start, end, _)| end - start)
+                        .sum();
+                    offset.saturating_sub(before)
+                }
+            })
+            .collect()
+    }
+
+    pub fn backspace_all(&mut self, font_sys: &mut FontSystem) {
+        if self.extra_cursors.is_empty() {
+            self.backspace(font_sys);
+            return;
+        }
+        let mut offsets = self.all_caret_offsets(font_sys);
+        offsets.sort_unstable();
+        offsets.dedup();
+
+        let mut ranges = Vec::new();
+        for offset in &offsets {
+            let (line, char_col) = self.buffer.char_to_line_col(*offset);
+            let shaped = self.shaped_line(line, font_sys);
+            if char_col > 0 {
+                if let Some((start, end)) = shaped.prev_cluster_char_range(char_col) {
+                    let line_start = self.buffer.line_col_to_char(line, 0);
+                    ranges.push((line_start + start, line_start + end));
+                }
+            } else if *offset > 0 {
+                ranges.push((offset - 1, *offset));
+            }
+        }
+        let ranges = Self::merge_ranges(ranges);
+        if ranges.is_empty() {
+            return;
+        }
+        let primary = self.cursor_char_offset(font_sys);
+        let new_offsets = Self::offsets_after_deletions(&offsets, &ranges);
+        let primary_rank = offsets
+            .iter()
+            .position(|offset| *offset == primary)
+            .unwrap_or(0);
+
+        self.selection_anchor = None;
+        let before = (self.cursor.line, self.cursor.cluster_idx);
+        for (start, end) in ranges.iter().rev() {
+            self.buffer.delete(*start, *end, before, before);
+        }
+        let primary_offset = new_offsets[primary_rank];
+        let extras: Vec<usize> = new_offsets
+            .into_iter()
+            .enumerate()
+            .filter(|(rank, _)| *rank != primary_rank)
+            .map(|(_, offset)| offset)
+            .collect();
+        self.apply_multi_offsets(primary_offset, extras, font_sys);
+    }
+
+    pub fn delete_all(&mut self, font_sys: &mut FontSystem) {
+        if self.extra_cursors.is_empty() {
+            self.delete(font_sys);
+            return;
+        }
+        let mut offsets = self.all_caret_offsets(font_sys);
+        offsets.sort_unstable();
+        offsets.dedup();
+
+        let mut ranges = Vec::new();
+        for offset in &offsets {
+            let (line, char_col) = self.buffer.char_to_line_col(*offset);
+            let shaped = self.shaped_line(line, font_sys);
+            if let Some((start, end)) = shaped.next_cluster_char_range(char_col) {
+                let line_start = self.buffer.line_col_to_char(line, 0);
+                ranges.push((line_start + start, line_start + end));
+            } else if *offset < self.buffer.len_chars() {
+                ranges.push((*offset, *offset + 1));
+            }
+        }
+        let ranges = Self::merge_ranges(ranges);
+        if ranges.is_empty() {
+            return;
+        }
+        let primary = self.cursor_char_offset(font_sys);
+        let new_offsets = Self::offsets_after_deletions(&offsets, &ranges);
+        let primary_rank = offsets
+            .iter()
+            .position(|offset| *offset == primary)
+            .unwrap_or(0);
+
+        self.selection_anchor = None;
+        let before = (self.cursor.line, self.cursor.cluster_idx);
+        for (start, end) in ranges.iter().rev() {
+            self.buffer.delete(*start, *end, before, before);
+        }
+        let primary_offset = new_offsets[primary_rank];
+        let extras: Vec<usize> = new_offsets
+            .into_iter()
+            .enumerate()
+            .filter(|(rank, _)| *rank != primary_rank)
+            .map(|(_, offset)| offset)
+            .collect();
+        self.apply_multi_offsets(primary_offset, extras, font_sys);
+    }
+
+    pub fn move_carets(&mut self, dx: isize, dy: isize, select: bool, font_sys: &mut FontSystem) {
+        if self.extra_cursors.is_empty() {
+            match (dx, dy) {
+                (-1, 0) => self.move_left(select, font_sys),
+                (1, 0) => self.move_right(select, font_sys),
+                (0, -1) => self.move_up(select, font_sys),
+                (0, 1) => self.move_down(select, font_sys),
+                _ => {}
+            }
+            return;
+        }
+
+        if select && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        } else if !select {
+            self.selection_anchor = None;
+        }
+
+        let mut carets = vec![self.cursor];
+        carets.extend(self.extra_cursors.iter().copied());
+        for caret in &mut carets {
+            if dx < 0 {
+                if caret.cluster_idx > 0 {
+                    caret.cluster_idx -= 1;
+                } else if caret.line > 0 {
+                    caret.line -= 1;
+                    let count = self.shaped_line(caret.line, font_sys).cluster_count();
+                    caret.cluster_idx = count;
+                }
+            } else if dx > 0 {
+                let count = self.shaped_line(caret.line, font_sys).cluster_count();
+                if caret.cluster_idx < count {
+                    caret.cluster_idx += 1;
+                } else if caret.line + 1 < self.buffer.len_lines() {
+                    caret.line += 1;
+                    caret.cluster_idx = 0;
+                }
+            }
+            if dy < 0 && caret.line > 0 {
+                caret.line -= 1;
+                let count = self.shaped_line(caret.line, font_sys).cluster_count();
+                caret.cluster_idx = caret.cluster_idx.min(count);
+            } else if dy > 0 && caret.line + 1 < self.buffer.len_lines() {
+                caret.line += 1;
+                let count = self.shaped_line(caret.line, font_sys).cluster_count();
+                caret.cluster_idx = caret.cluster_idx.min(count);
+            }
+            caret.preferred_visual_x = None;
+        }
+
+        self.cursor = carets[0];
+        self.extra_cursors = carets[1..].to_vec();
+        self.scroll_to_cursor_requested = true;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn extra_caret_at_pixel(
+        &mut self,
+        px: f32,
+        py: f32,
+        vp_x: f32,
+        content_y: f32,
+        gutter_w: f32,
+        line_h: f32,
+        font_sys: &mut FontSystem,
+    ) {
+        let primary = self.cursor;
+        let anchor = self.selection_anchor;
+        self.set_cursor_from_pixel(px, py, vp_x, content_y, gutter_w, line_h, font_sys, false);
+        let caret = self.cursor;
+        self.cursor = primary;
+        self.selection_anchor = anchor;
+        self.add_caret_at(caret.line, caret.cluster_idx);
     }
 
     pub fn backspace(&mut self, font_sys: &mut FontSystem) {
@@ -1120,6 +1471,25 @@ mod tests {
         // Insert inside braces
         doc.insert_text("let x = 42; ", &mut font_sys);
         assert_eq!(doc.buffer.line_to_string(1), "let x = 42; }");
+    }
+
+    #[test]
+    fn test_multi_cursor_insert_and_backspace() {
+        let config = Config::default();
+        let mut font_sys = FontSystem::new(&config, 1.0);
+        let mut doc = EditorDocument::from_text("aa", None, false);
+
+        doc.add_caret_at(0, 1);
+        assert_eq!(doc.caret_count(), 2);
+        doc.insert_text_all("X", &mut font_sys);
+
+        assert_eq!(doc.buffer.line_to_string(0), "XaXa");
+        assert_eq!(doc.cursor.line, 0);
+        assert_eq!(doc.cursor.cluster_idx, 1);
+        assert_eq!(doc.extra_cursors[0].cluster_idx, 3);
+
+        doc.backspace_all(&mut font_sys);
+        assert_eq!(doc.buffer.line_to_string(0), "aa");
     }
 
     #[test]
