@@ -42,7 +42,7 @@ impl EditorView {
         find_bar: Option<&FindBar>,
         hover: Option<&HoverOverlay>,
         diagnostics: &[EditorDiagnostic],
-        plugin_status_items: &[String],
+        _plugin_status_items: &[String],
         lsp_status: Option<&str>,
         explorer: Option<&FileExplorer>,
         scrollbar_dragging: bool,
@@ -57,7 +57,7 @@ impl EditorView {
         ime_preedit: Option<&str>,
         ui_scale: f32,
         menu_height: f32,
-        metrics_label: Option<&str>,
+        _metrics_label: Option<&str>,
     ) {
         let ui = ui_scale.max(0.5);
         if raw_vp.w <= 10.0 || raw_vp.h <= 10.0 {
@@ -494,26 +494,29 @@ impl EditorView {
             .filter(|d| d.severity == lsp_types::DiagnosticSeverity::WARNING)
             .count();
         let mut right_info = format!(
-            "Ln {}, Col {}  |  E:{} W:{}  |  {}  |  {}",
+            "Ln {}, Col {}  |  {}",
             doc.cursor.line + 1,
             doc.cursor.cluster_idx + 1,
-            error_count,
-            warning_count,
             doc.language.display_name(),
-            lsp_status.unwrap_or("LSP: Idle"),
         );
+        if error_count > 0 || warning_count > 0 {
+            right_info.push_str(&format!("  |  E:{error_count} W:{warning_count}"));
+        }
+        if let Some(status) = lsp_status
+            && status != "LSP: Idle"
+        {
+            right_info.push_str(&format!("  |  {status}"));
+        }
         if git.is_repo {
             let branch = git.branch.as_deref().unwrap_or("git");
-            right_info.push_str(&format!("  |  {} ({})", branch, git.changes.len()));
+            if git.changes.is_empty() {
+                right_info.push_str(&format!("  |  {branch}"));
+            } else {
+                right_info.push_str(&format!("  |  {branch} ({})", git.changes.len()));
+            }
         }
         if doc.caret_count() > 1 {
             right_info.push_str(&format!("  |  {} cursors", doc.caret_count()));
-        }
-        for item in plugin_status_items {
-            right_info.push_str(&format!("  |  {item}"));
-        }
-        if let Some(metrics_txt) = metrics_label {
-            right_info.push_str(&format!("  |  {metrics_txt}"));
         }
         if let Some(vim) = vim
             && let Some((message, at)) = &vim.status_message
@@ -1708,17 +1711,6 @@ impl EditorView {
                 color.to_f32_rgba(if plugin.enabled { 0.88 } else { 0.48 }),
             );
         }
-
-        emit_simple_string(
-            config,
-            font_sys,
-            atlas,
-            fg_instances,
-            "ocean +plugin-install <path|url>",
-            x + 8.0 * ui,
-            y + height - (line_h + 4.0 * ui),
-            theme.foreground.to_f32_rgba(0.40),
-        );
     }
 
     #[allow(clippy::too_many_arguments)]

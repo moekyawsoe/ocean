@@ -66,6 +66,7 @@ cargo build --release
   - **Separate editor window by default**: `edit [path]`, `ocean edit [path]`, `ocean +editor-window [path]`, `Ctrl+Shift+O`, and File → **Open Editor in New Window** all keep the terminal window untouched and open the editor in its own window. Use `edit --here [path]` (or `--in-place`) when you want the old behavior of switching the current Ocean window into editor mode; `Ctrl+Shift+I` still toggles in place.
   - **Unsaved-work protection**: Closing a dirty document, closing the last tab/pane, quitting the app, or pressing the window close button opens a Save / Discard / Cancel confirmation dialog. `:q`, `:wq`, `Ctrl+W`, tab close buttons, and the palette all share the same protection. `:q!` and explicit Discard remain the only ways to drop work.
   - **Compact status bar**: The bottom Neovim-style status bar renders at 80% of the terminal font size by default, keeping shortcut chips readable without dominating the window.
+  - **Rounded pane chrome**: Terminal panes have rounded, theme-tinted borders with an inner text inset and a visible gap between split panes, so each pane reads as a distinct modern surface.
   - **Nerd Font icon system**: UI and file-type icons render from Nerd Font private-use glyphs, tinted by the active theme and language. Bundled 1×/2× PNG icons remain as an automatic fallback when no patched Nerd Font is installed.
   - **Top menu bar & recent files**: `File / Edit / View / Go / Help` menus (F10 or mouse) with recent files, quick open, find, view toggles, and editor/terminal split actions.
   - **Plugin manager**: Plugin manifests and registry, local/URL installation with SHA-256 verification, enable/disable, uninstall, update, checksum verification, and a Plugins sidebar panel. CLI: `ocean +plugin-list`, `+plugin-install`, `+plugin-remove`, `+plugin-enable`, `+plugin-disable`, `+plugin-info`, `+plugin-verify`, `+plugin-update`.
@@ -90,6 +91,11 @@ cargo build --release
   - Clean bottom mode & shortcut status bar (`OCEAN`, `TUI`, `SCROLL`, `MENU`, `THEME`, `HELP`) showing live context-aware keybindings, active split indicator, and theme pill (toggleable via `Ctrl+Shift+B` or `window-show-status-bar = false`).
   - Open the Context Menu anytime from the keyboard with `Ctrl+Shift+P` (or `Menu` / `Shift+F10`) anchored right at the terminal cursor, and navigate with Vim keys (`j`/`k`, `t` for themes, `1`–`9` quick-picks, single-key mnemonics, `h`/`l`, `Esc`/`q`).
   - Full keyboard split management: focus (`Alt+Shift+H/J/K/L` or `Alt+Shift+Arrows`), resize (`Ctrl+Alt+H/J/K/L` or `Ctrl+Alt+Arrows`), and equalize (`Alt+Shift+=`).
+- **Built-in `file` Tool (`file [path]` or `ocean file [path]`)**:
+  - **Universal Terminal File Viewer**: Open any file or URL right from the terminal with sub-millisecond startup and zero lag.
+  - **Multitasking PDF Viewer with Auto-Split**: Running `file document.pdf` inside Ocean automatically splits a pane to the side, allowing you to read documentation without disrupting your running shell task. When you exit with `q`, the split pane closes automatically.
+  - **Dedicated Markdown Reader**: View `.md` files in a dedicated read/view pager with ANSI headings, code block borders, blockquotes, styled lists, tables, and `/` search (read-only mode so existing `edit` tool remains your editor).
+  - **Lightweight Audio / Video & YouTube Player**: Play local media files (`.mp3`, `.wav`, `.ogg`, `.flac`, `.mp4`, `.mkv`, etc.) and stream YouTube songs or playlists by URL, video ID, or playlist ID. Features interactive terminal playback controls: `[Space]` pause/resume, `[n]` next track, `[p]` previous track, `[s]` stop, and `[q]` quit.
 - **Ghostty-Compatible Config (`~/.config/ocean/config`)**:
   - Clean `key = value` syntax — supports `font-family`, `font-size`, `theme`, `background`, `foreground`, `background-opacity`, `palette`, `cursor-style`, `window-padding-x/y`, `adjust-cell-height/width`, `keybind`, `config-file`, and **live hot-reload** on save or `Ctrl+Shift+,` / `Ctrl+Shift+R`.
 
@@ -205,7 +211,9 @@ keybind = ctrl+backslash=toggle_split_mode
 |---|---|
 | `Ctrl+B` | Toggle File Explorer Sidebar (show / hide project folder tree) |
 | `Ctrl+S` | Save current document buffer to disk |
-| `Ctrl+P` | Open the Neovim-style bottom `:` command palette / fuzzy file finder |
+| `F1` | Open Help & Shortcuts (when the editor has focus) |
+| `Ctrl+P` / `Ctrl+Shift+P` | Open the Neovim-style bottom `:` command palette / fuzzy file finder in the editor |
+| `Alt+1`…`Alt+5` | Editor panels: Explorer / Search / Problems / Plugins / Git |
 | `Ctrl+Shift+F` | Open the workspace Search panel (results respect `.gitignore`) |
 | `Ctrl+Shift+G` | Open Git Source Control changes and refresh status |
 | `Ctrl+F` | Open the Neovim-style bottom `/` search line (`Enter` / `Shift+Enter` cycles matches, `Esc` dismisses) |

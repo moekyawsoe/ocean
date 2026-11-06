@@ -91,30 +91,31 @@ pub fn encode_key_event(event: &KeyEvent, mods: ModifiersState, mode: TermMode) 
     }
 
     // Ctrl + key control codes
-    if ctrl && !mods.super_key()
+    if ctrl
+        && !mods.super_key()
         && let Key::Character(s) = &event.logical_key
-            && let Some(ch) = s.chars().next()
-        {
-            let lower = ch.to_ascii_lowercase();
-            let ctl_byte: Option<u8> = match lower {
-                'a'..='z' => Some((lower as u8) - b'a' + 1),
-                '@' | '2' => Some(0x00),
-                '[' | '3' => Some(0x1b),
-                '\\' | '4' => Some(0x1c),
-                ']' | '5' => Some(0x1d),
-                '^' | '6' => Some(0x1e),
-                '_' | '/' | '7' => Some(0x1f),
-                '8' => Some(0x7f),
-                _ => None,
+        && let Some(ch) = s.chars().next()
+    {
+        let lower = ch.to_ascii_lowercase();
+        let ctl_byte: Option<u8> = match lower {
+            'a'..='z' => Some((lower as u8) - b'a' + 1),
+            '@' | '2' => Some(0x00),
+            '[' | '3' => Some(0x1b),
+            '\\' | '4' => Some(0x1c),
+            ']' | '5' => Some(0x1d),
+            '^' | '6' => Some(0x1e),
+            '_' | '/' | '7' => Some(0x1f),
+            '8' => Some(0x7f),
+            _ => None,
+        };
+        if let Some(b) = ctl_byte {
+            return if alt {
+                Some(vec![0x1b, b])
+            } else {
+                Some(vec![b])
             };
-            if let Some(b) = ctl_byte {
-                return if alt {
-                    Some(vec![0x1b, b])
-                } else {
-                    Some(vec![b])
-                };
-            }
         }
+    }
 
     // Standard UTF-8 character input (covers ASCII, XKB Burmese `mm` layout, Unicode compose!)
     if !ctrl && !mods.super_key() {

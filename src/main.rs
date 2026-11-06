@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod confirm;
 pub mod editor;
+pub mod file;
 mod font;
 mod help;
 mod ipc;
@@ -191,10 +192,13 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
                     continue;
                 }
             }
-            s if !s.starts_with('-') && !s.starts_with('+')
-                && initial_editor_mode && editor_file.is_none() => {
-                    editor_file = Some(PathBuf::from(s));
-                }
+            s if !s.starts_with('-')
+                && !s.starts_with('+')
+                && initial_editor_mode
+                && editor_file.is_none() =>
+            {
+                editor_file = Some(PathBuf::from(s));
+            }
             _ => {}
         }
         i += 1;
@@ -230,6 +234,22 @@ pub fn parse_cli_args(prog_name: &str, args: &[String]) -> ParsedCli {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let prog_name = std::env::args().next().unwrap_or_default();
+
+    let is_file_binary = prog_name.ends_with("/file")
+        || prog_name == "file"
+        || prog_name.ends_with("/ocean-file")
+        || prog_name == "ocean-file";
+
+    if is_file_binary || args.first().map(|s| s.as_str()) == Some("file") {
+        let file_args = if !is_file_binary && args.first().map(|s| s.as_str()) == Some("file") {
+            &args[1..]
+        } else {
+            &args[..]
+        };
+        crate::file::run_file_cli(file_args);
+        return;
+    }
+
     let cli = parse_cli_args(&prog_name, &args);
 
     if cli.print_help {
@@ -331,9 +351,19 @@ fn main() {
 
     let mut app = OceanApp::new(config, launch_opts, proxy);
     if let Err(err) = event_loop.run_app(&mut app) {
-        eprintln!("ocean runtime error: {err}");
-        std::process::exit(1);
+        let message = err.to_string();
+        if !is_benign_shutdown_error(&message) {
+            eprintln!("ocean runtime error: {message}");
+            std::process::exit(1);
+        }
     }
+}
+
+fn is_benign_shutdown_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("glxbadwindow")
+        || lower.contains("glxbaddrawable")
+        || lower.contains("badwindow (code:")
 }
 
 fn run_plus_action(act: &str, config: &Config, force: bool, args: &[String]) {
@@ -1161,6 +1191,17 @@ mod tests {
         assert!(cli.initial_editor_mode);
         assert!(cli.new_editor_window);
         assert_eq!(cli.editor_file, Some(PathBuf::from("Cargo.toml")));
+    }
+
+    #[test]
+    fn benign_x11_shutdown_errors_are_not_reported_as_fatal() {
+        assert!(is_benign_shutdown_error(
+            "Xlib error: X error: GLXBadWindow (code: 168, request code: 148, minor code: 32)"
+        ));
+        assert!(is_benign_shutdown_error(
+            "X error: BadWindow (code: 3, request code: 12)"
+        ));
+        assert!(!is_benign_shutdown_error("Failed creating GL 3.3 context"));
     }
 
     #[test]

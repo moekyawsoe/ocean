@@ -250,6 +250,10 @@ impl SplitNode {
     }
 }
 
+pub fn pane_inset(scale_factor: f64) -> f32 {
+    (7.0 * scale_factor as f32).round().max(3.0)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PaneLayout {
     pub pane_id: u64,
@@ -380,17 +384,22 @@ pub fn compute_split_layout_in_rect(
     let avail_h = (rect_h - pad_t - pad_b).max(ch);
 
     if let SplitNode::Leaf(pane_id) = root {
-        let cols = (avail_w / cw).floor().clamp(2.0, 1000.0) as u16;
-        let rows = (avail_h / ch).floor().clamp(1.0, 500.0) as u16;
+        let inset = pane_inset(scale_factor);
+        let content_x = rect_x + pad_l + inset;
+        let content_y = rect_y + pad_t + inset;
+        let content_w = (avail_w - inset * 2.0).max(cw * 2.0);
+        let content_h = (avail_h - inset * 2.0).max(ch);
+        let cols = (content_w / cw).floor().clamp(2.0, 1000.0) as u16;
+        let rows = (content_h / ch).floor().clamp(1.0, 500.0) as u16;
         let (ox, oy) = if config.window_padding_balance {
-            let rem_w = (avail_w - cols as f32 * cw).max(0.0);
-            let rem_h = (avail_h - rows as f32 * ch).max(0.0);
+            let rem_w = (content_w - cols as f32 * cw).max(0.0);
+            let rem_h = (content_h - rows as f32 * ch).max(0.0);
             (
-                (rect_x + pad_l + rem_w * 0.5).floor(),
-                (rect_y + pad_t + rem_h * 0.5).floor(),
+                (content_x + rem_w * 0.5).floor(),
+                (content_y + rem_h * 0.5).floor(),
             )
         } else {
-            ((rect_x + pad_l).floor(), (rect_y + pad_t).floor())
+            (content_x.floor(), content_y.floor())
         };
         return (
             vec![PaneLayout {
@@ -411,8 +420,9 @@ pub fn compute_split_layout_in_rect(
     let mut panes = Vec::new();
     let mut dividers = Vec::new();
     let mut path = Vec::new();
-    let gap = (10.0 * sf).round().max(4.0);
+    let gap = (12.0 * sf).round().max(6.0);
     let line_thick = (1.0 * sf).round().max(1.0);
+    let inset = pane_inset(scale_factor);
 
     #[allow(clippy::too_many_arguments)]
     fn walk(
@@ -425,6 +435,7 @@ pub fn compute_split_layout_in_rect(
         ch: f32,
         gap: f32,
         line_thick: f32,
+        inset: f32,
         balance: bool,
         path: &mut Vec<bool>,
         panes: &mut Vec<PaneLayout>,
@@ -432,14 +443,21 @@ pub fn compute_split_layout_in_rect(
     ) {
         match node {
             SplitNode::Leaf(pane_id) => {
-                let cols = (w / cw).floor().clamp(2.0, 1000.0) as u16;
-                let rows = (h / ch).floor().clamp(1.0, 500.0) as u16;
+                let content_x = x + inset;
+                let content_y = y + inset;
+                let content_w = (w - inset * 2.0).max(cw * 2.0);
+                let content_h = (h - inset * 2.0).max(ch);
+                let cols = (content_w / cw).floor().clamp(2.0, 1000.0) as u16;
+                let rows = (content_h / ch).floor().clamp(1.0, 500.0) as u16;
                 let (ox, oy) = if balance {
-                    let rem_w = (w - cols as f32 * cw).max(0.0);
-                    let rem_h = (h - rows as f32 * ch).max(0.0);
-                    ((x + rem_w * 0.5).floor(), (y + rem_h * 0.5).floor())
+                    let rem_w = (content_w - cols as f32 * cw).max(0.0);
+                    let rem_h = (content_h - rows as f32 * ch).max(0.0);
+                    (
+                        (content_x + rem_w * 0.5).floor(),
+                        (content_y + rem_h * 0.5).floor(),
+                    )
                 } else {
-                    (x.floor(), y.floor())
+                    (content_x.floor(), content_y.floor())
                 };
                 panes.push(PaneLayout {
                     pane_id: *pane_id,
@@ -478,13 +496,14 @@ pub fn compute_split_layout_in_rect(
 
                     path.push(false);
                     walk(
-                        first, x, y, w1, h, cw, ch, gap, line_thick, balance, path, panes, dividers,
+                        first, x, y, w1, h, cw, ch, gap, line_thick, inset, balance, path, panes,
+                        dividers,
                     );
                     path.pop();
 
                     path.push(true);
                     walk(
-                        second, x2, y, w2, h, cw, ch, gap, line_thick, balance, path, panes,
+                        second, x2, y, w2, h, cw, ch, gap, line_thick, inset, balance, path, panes,
                         dividers,
                     );
                     path.pop();
@@ -508,13 +527,14 @@ pub fn compute_split_layout_in_rect(
 
                     path.push(false);
                     walk(
-                        first, x, y, w, h1, cw, ch, gap, line_thick, balance, path, panes, dividers,
+                        first, x, y, w, h1, cw, ch, gap, line_thick, inset, balance, path, panes,
+                        dividers,
                     );
                     path.pop();
 
                     path.push(true);
                     walk(
-                        second, x, y2, w, h2, cw, ch, gap, line_thick, balance, path, panes,
+                        second, x, y2, w, h2, cw, ch, gap, line_thick, inset, balance, path, panes,
                         dividers,
                     );
                     path.pop();
@@ -533,6 +553,7 @@ pub fn compute_split_layout_in_rect(
         ch,
         gap,
         line_thick,
+        inset,
         config.window_padding_balance,
         &mut path,
         &mut panes,

@@ -1055,6 +1055,50 @@ impl EditorWorkspace {
             }
         }
 
+        if alt
+            && !ctrl
+            && !shift
+            && let Key::Character(key) = &event.logical_key
+        {
+            let handled = match key.as_str() {
+                "1" => {
+                    if self.active_panel == SidebarPanel::Explorer && self.explorer.visible {
+                        self.explorer.visible = false;
+                    } else {
+                        self.active_panel = SidebarPanel::Explorer;
+                        self.explorer.visible = true;
+                    }
+                    true
+                }
+                "2" => {
+                    self.active_panel = SidebarPanel::Search;
+                    self.explorer.visible = true;
+                    self.search.active = true;
+                    true
+                }
+                "3" => {
+                    self.active_panel = SidebarPanel::Problems;
+                    self.explorer.visible = true;
+                    true
+                }
+                "4" => {
+                    self.active_panel = SidebarPanel::Plugins;
+                    self.explorer.visible = true;
+                    true
+                }
+                "5" => {
+                    self.active_panel = SidebarPanel::Git;
+                    self.explorer.visible = true;
+                    self.refresh_git();
+                    true
+                }
+                _ => false,
+            };
+            if handled {
+                return true;
+            }
+        }
+
         // 4b. Vim modal dispatch (opt-in via `editor-keymap = vim`)
         if self.vim.enabled {
             match self.vim.mode {

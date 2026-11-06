@@ -24,7 +24,7 @@
       <a href="#top" class="brand">
         <img src="./assets/ocean.svg" alt="Ocean Terminal Logo" class="brand-logo" />
         <span>Ocean</span>
-        <span class="brand-badge">Rust + OpenGL</span>
+        <span class="brand-badge">Fast &amp; lightweight</span>
       </a>
 
       <nav class="main-nav" aria-label="Primary Navigation">
@@ -60,7 +60,7 @@
       <div class="hero-pill">
         <strong>Ocean Terminal</strong>
         <span>•</span>
-        <span>Single-draw-call GPU engine • Native Myanmar (`မြန်မာဘာသာ`) shaping</span>
+        <span>Fast • Myanmar-ready • Built-in code editor and Git</span>
       </div>
 
       <div class="hero-logo-wrap">
@@ -68,13 +68,12 @@
       </div>
 
       <h1 class="hero-headline">
-        The terminal engineered for <em>speed</em> and <em>script</em>.
+        A fast, comfortable terminal for Linux.
       </h1>
 
       <p class="hero-subtitle">
-        A clean, minimal, GPU-accelerated terminal emulator written in Rust — combining
-        <strong>0% idle CPU</strong>, HarfBuzz OpenType Myanmar/Burmese shaping with zero dotted circles,
-        keyboard-first splits, and Ghostty-compatible configuration.
+        A clean, fast terminal for Linux with native Myanmar shaping, a built-in code editor,
+        Git changes and blame, keyboard-first splits, and a focused dark or light theme.
       </p>
 
       <div class="hero-cta-row">
@@ -104,9 +103,9 @@
         <input type="radio" name="showcase" id="tab-light" class="showcase-radio" />
 
         <div class="showcase-tabs">
-          <label for="tab-dark" class="showcase-tab-label">01 · Ocean Dark &amp; Myanmar Shaping</label>
-          <label for="tab-splits" class="showcase-tab-label">02 · Split Panes, Tabs &amp; Theme Menu</label>
-          <label for="tab-light" class="showcase-tab-label">03 · Ocean Light Mode</label>
+          <label for="tab-dark" class="showcase-tab-label">01 · Ocean Dark</label>
+          <label for="tab-splits" class="showcase-tab-label">02 · Split Panes</label>
+          <label for="tab-light" class="showcase-tab-label">03 · Ocean Light</label>
         </div>
 
         <div class="showcase-frame">
@@ -118,7 +117,7 @@
               />
             </div>
             <div class="showcase-caption">
-              <strong>Ocean Dark</strong> — HarfBuzz <code>mym2</code> shaping, razor-sharp procedural box drawing, and context-aware bottom shortcut bar.
+              <strong>Ocean Dark</strong> — calm colors, crisp text, and correct Myanmar shaping.
             </div>
           </div>
 
@@ -130,7 +129,7 @@
               />
             </div>
             <div class="showcase-caption">
-              <strong>Keyboard-First Splits &amp; Context Menu</strong> — Press <kbd>Ctrl+Shift+P</kbd> anytime to open the Vim-navigable menu &amp; live theme switcher.
+              <strong>Split Panes</strong> — Run two tasks side by side and resize them without leaving the keyboard.
             </div>
           </div>
 
@@ -142,153 +141,130 @@
               />
             </div>
             <div class="showcase-caption">
-              <strong>Ocean Light</strong> — High-contrast daytime typography among 10 curated built-in themes (5 Dark + 5 Light).
+              <strong>Ocean Light</strong> — a bright, high-contrast theme for daytime work.
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Performance & Engineering Metrics Strip -->
+    <!-- Product Highlights -->
     <section class="section-band">
       <div class="metrics-grid">
         <div class="metric-cell">
-          <div class="metric-value">1 Draw Call</div>
-          <div class="metric-label">OpenGL 3.3 / GLES 3.0 instanced quad batching</div>
+          <div class="metric-value">Fast</div>
+          <div class="metric-label">Lightweight terminal with smooth splits and tabs</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-value">0% Idle CPU</div>
-          <div class="metric-label">Pure event-driven <code>ControlFlow::Wait</code> loop</div>
+          <div class="metric-value">Editor</div>
+          <div class="metric-label">Built-in code editor with search, LSP, and Git</div>
         </div>
         <div class="metric-cell">
-          <div class="metric-value">mym2 / mymr</div>
-          <div class="metric-label">Full Myanmar OpenType shaping + UTN #11 normalization</div>
+          <div class="metric-value">မြန်မာ</div>
+          <div class="metric-label">Correct Myanmar shaping and comfortable input</div>
         </div>
         <div class="metric-cell">
           <div class="metric-value">10 Themes</div>
-          <div class="metric-label">5 Dark + 5 Light built in with instant hot-reload</div>
+          <div class="metric-label">Five dark and five light themes, switch instantly</div>
         </div>
       </div>
     </section>
 
-    <!-- Core Pillars Architectural Grid -->
+    <!-- Feature Grid -->
     <section id="features" class="section-band">
       <div class="section-inner">
-        <div class="section-eyebrow">Architecture</div>
-        <h2 class="section-title">Minimal footprint. Zero compromises.</h2>
+        <div class="section-eyebrow">Features</div>
+        <h2 class="section-title">A terminal and editor that stay out of your way.</h2>
         <p class="section-desc">
-          Built from scratch in Rust around <code>alacritty_terminal</code>, <code>glutin</code>, <code>glow</code>,
-          <code>rustybuzz</code>, and <code>swash</code> — no Electron, no GTK bloat, and only standard C runtime links.
+          One lightweight app for running commands, editing code, and checking Git.
         </p>
       </div>
 
       <div class="bento-grid">
         <article class="bento-card">
-          <div class="bento-index">01 / GPU RENDERER</div>
-          <h3>Single-Draw-Call OpenGL Engine</h3>
-          <p>
-            Every background cell, shaped glyph, color emoji, split divider, and status pill is packed into a single
-            instanced GPU draw call per frame.
-          </p>
+          <div class="bento-index">01 / TERMINAL</div>
+          <h3>Fast and focused</h3>
+          <p>Smooth terminal with tabs and split panes for everyday work.</p>
           <ul class="bento-list">
-            <li>Shelf-packed <code>swash</code> alpha &amp; RGBA emoji glyph atlas</li>
-            <li>O(1) <code>FxHashMap</code> shaped-run memoization across rows</li>
-            <li>Procedural GPU box-drawing (<code>╭─┬─╮</code>) for crisp TUI borders</li>
-            <li>Coalesced PTY reader for tear-free high-throughput output</li>
+            <li>Keyboard-first tabs and splits</li>
+            <li>Rounded pane borders with a clean, modern look</li>
+            <li>Status bar with only the shortcuts you need</li>
           </ul>
         </article>
 
         <article class="bento-card">
-          <div class="bento-index">02 / KEYBOARD WORKFLOW</div>
-          <h3>Splits, Tabs &amp; Neovim-Style Bar</h3>
-          <p>
-            Designed for developers who live on the home row, with discoverable shortcuts right in the bottom status bar.
-          </p>
+          <div class="bento-index">02 / CODE EDITOR</div>
+          <h3>Edit without leaving the terminal</h3>
+          <p>A small, fast editor for files, folders, and quick fixes.</p>
           <ul class="bento-list">
-            <li>Live mode indicator (<code>OCEAN</code>, <code>TUI</code>, <code>SCROLL</code>, <code>MENU</code>, <code>THEME</code>, <code>HELP</code>)</li>
-            <li>Cursor-anchored Context Menu via <kbd>Ctrl+Shift+P</kbd> with <kbd>j</kbd>/<kbd>k</kbd> &amp; mnemonics</li>
-            <li>Split right/down (<kbd>Ctrl+Shift+D</kbd>/<kbd>E</kbd>), focus (<kbd>Alt+Shift+H/J/K/L</kbd>), resize &amp; equalize</li>
-            <li>Auto-hiding tab bar when a single tab is open for a distraction-free canvas</li>
+            <li>Tabs, file explorer, command palette, and search</li>
+            <li>LSP completion, diagnostics, and hover</li>
+            <li>Git changes, gutter markers, and inline blame</li>
           </ul>
         </article>
 
         <article class="bento-card">
-          <div class="bento-index">03 / MYANMAR &amp; IME</div>
-          <h3>Native Burmese Typography &amp; Input</h3>
-          <p>
-            First-class support for <code>U+1000..U+109F</code>, <code>U+AA60..U+AA7F</code>, and <code>U+A9E0..U+A9FF</code>
-            without clipped vowels or broken clusters.
-          </p>
+          <div class="bento-index">03 / MYANMAR</div>
+          <h3>Myanmar text that just works</h3>
+          <p>Correct Burmese shaping without dotted circles or broken clusters.</p>
           <ul class="bento-list">
-            <li>2-layer vertical compositing prevents upper/lower mark clipping</li>
-            <li>Native Wayland (<code>zwp_text_input_v3</code>) &amp; X11 (<code>XIM</code>) live preedit overlay</li>
-            <li>Automatic UTN #11 combining-order normalization while typing</li>
-            <li>One-key Zawgyi-One legacy log display toggle (<kbd>Ctrl+Shift+M</kbd>)</li>
+            <li>Native IME support while typing</li>
+            <li>Adjustable Myanmar font size</li>
+            <li>Legacy Zawgyi toggle when you need it</li>
           </ul>
         </article>
 
         <article class="bento-card">
-          <div class="bento-index">04 / GHOSTTY CONFIG</div>
-          <h3>Clean <code>key = value</code> Configuration</h3>
-          <p>
-            Drop a clean plain-text file at <code>~/.config/ocean/config</code> — changes apply live the moment you save.
-          </p>
+          <div class="bento-index">04 / PERSONAL</div>
+          <h3>Simple to make yours</h3>
+          <p>One plain config file changes the app live.</p>
           <ul class="bento-list">
-            <li>Supports <code>font-family</code>, <code>font-family-myanmar</code>, <code>theme</code>, <code>background-opacity</code></li>
-            <li>Ghostty-compatible <code>keybind = mods+key=action</code> bindings</li>
-            <li>Built-in CLI diagnostics: <code>+init-config</code>, <code>+validate-config</code>, <code>+show-config</code></li>
-            <li>Loads custom Ghostty theme files from <code>~/.config/ocean/themes/</code></li>
+            <li>10 built-in themes, five dark and five light</li>
+            <li>Custom keybindings and editor font scale</li>
+            <li>Nerd Font icons with automatic fallback</li>
           </ul>
         </article>
       </div>
     </section>
 
-    <!-- Myanmar Shaping Deep Dive -->
+    <!-- Myanmar Support -->
     <section id="myanmar" class="section-band">
       <div class="section-inner">
         <div class="section-eyebrow">Myanmar / Burmese Support</div>
-        <h2 class="section-title">Every syllable shaped accurately — zero dotted circles.</h2>
+        <h2 class="section-title">Myanmar text that reads naturally.</h2>
         <p class="section-desc">
-          Most GPU terminals render cells strictly one codepoint at a time, breaking Burmese pre-base vowels, Kinzi,
-          and stacked consonants. Ocean shapes complete grapheme &amp; script runs with HarfBuzz (<code>rustybuzz</code>).
+          Burmese syllables stay intact while typing, selecting, and deleting — no dotted circles or broken clusters.
         </p>
 
         <div class="myanmar-split">
           <div class="myanmar-specimen">
             <div class="specimen-row">
-              <div class="specimen-tag">Kinzi + Tall AA</div>
+              <div class="specimen-tag">Everyday text</div>
               <div class="specimen-text">မင်္ဂလာပါ — မြန်မာဘာသာစကားနှင့် စာပေ</div>
             </div>
             <div class="specimen-row">
-              <div class="specimen-tag">Stacked Subjoined Consonants &amp; Medials</div>
+              <div class="specimen-tag">Stacked consonants</div>
               <div class="specimen-text">ပြည်ထောင်စုသမ္မတမြန်မာနိုင်ငံတော် • ဗုဒ္ဓဘာသာ • ဣန္ဒြေ • တက္ကသိုလ်</div>
             </div>
             <div class="specimen-row">
-              <div class="specimen-tag">UTN #11 Auto-Normalization</div>
+              <div class="specimen-tag">Typing order</div>
               <div class="specimen-text"><code>ကုိ</code> → <strong>ကို</strong> &nbsp;•&nbsp; <code>ကေြ</code> → <strong>ကြေ</strong></div>
             </div>
             <div class="specimen-row">
-              <div class="specimen-tag">Myanmar Digits &amp; Punctuation</div>
+              <div class="specimen-tag">Digits</div>
               <div class="specimen-text">၀ ၁ ၂ ၃ ၄ ၅ ၆ ၇ ၈ ၉ — ရန်ကုန်မြို့ နှင့် မန္တလေးမြို့။</div>
             </div>
           </div>
 
           <div class="code-card">
             <div class="code-card-header">
-              <span>Diagnostic Check</span>
-              <span>ocean +myanmar-check</span>
+              <span>Also included</span>
             </div>
-            <pre><span class="tok-cmd">$ ocean +myanmar-check</span>
-Ocean Myanmar/Burmese Shaping Diagnostic
-  Primary font : Cascadia Code NF
-  Myanmar font : Padauk
-  Cell metrics : 9x22 px (baseline=17 px, mm_px=13.0)
-  [<span class="tok-val">PASS</span>] Greeting (Kinzi + Tall AA)   -&gt; မင်္ဂလာပါ
-  [<span class="tok-val">PASS</span>] Official Country Name        -&gt; ပြည်ထောင်စု...
-  [<span class="tok-val">PASS</span>] Pre-base E + Medial Ra+Wa    -&gt; ကြွေးမြီ
-  [<span class="tok-val">PASS</span>] Stacked Pali Consonants      -&gt; ဗုဒ္ဓဘာသာ နှင့် ဣန္ဒြေ
-  [<span class="tok-val">PASS</span>] Upper+Lower Marks            -&gt; ရန်ကုန်မြို့ ...
-  [<span class="tok-val">PASS</span>] Myanmar Digits               -&gt; ၀၁၂၃၄၅၆၇၈၉</pre>
+            <ul class="bento-list">
+              <li>Live IME preview while typing</li>
+              <li>Adjustable Myanmar font size</li>
+              <li>Optional legacy Zawgyi display</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -420,28 +396,18 @@ cargo build --release</pre>
 
           <div class="code-card">
             <div class="code-card-header">
-              <span>Ghostty-Style CLI Actions &amp; Flags</span>
+              <span>Useful commands</span>
               <span>ocean --help</span>
             </div>
-            <pre><span class="tok-comment"># Create starter config at ~/.config/ocean/config</span>
+            <pre><span class="tok-comment"># Create a starter config</span>
 <span class="tok-cmd">ocean</span> <span class="tok-flag">+init-config</span>
 
-<span class="tok-comment"># List discovered Monospace &amp; Myanmar/Burmese fonts</span>
+<span class="tok-comment"># List themes or fonts</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+list-themes</span>
 <span class="tok-cmd">ocean</span> <span class="tok-flag">+list-fonts</span>
 
-<span class="tok-comment"># List all 10 built-in dark &amp; light themes</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">+list-themes</span>
-
-<span class="tok-comment"># Verify Myanmar OpenType shaping on your system</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">+myanmar-check</span>
-
-<span class="tok-comment"># Inspect resolved config or validate config syntax</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">+show-config</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">+validate-config</span>
-
-<span class="tok-comment"># Override any config key or run a command directly</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">--theme=catppuccin-mocha</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">--working-directory</span> ~/projects <span class="tok-flag">-e</span> htop</pre>
+<span class="tok-comment"># Check Myanmar shaping</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+myanmar-check</span></pre>
           </div>
         </div>
       </div>
@@ -567,60 +533,44 @@ cargo build --release</pre>
             </thead>
             <tbody>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd> / <kbd>Shift</kbd> + <kbd>F10</kbd></td>
-                <td>Open / close Context Menu at cursor (navigate with <kbd>j</kbd>/<kbd>k</kbd>, <kbd>t</kbd> themes, <kbd>1</kbd>–<kbd>9</kbd>)</td>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd></td>
+                <td>Open the context menu in the terminal</td>
               </tr>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></td>
-                <td>Show / hide bottom Neovim-style shortcut status bar</td>
+                <td><kbd>Ctrl</kbd> + <kbd>P</kbd></td>
+                <td>Open the command palette in the editor</td>
               </tr>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>?</kbd></td>
-                <td>Toggle in-app Help &amp; Documentation dialog (<kbd>1</kbd>–<kbd>5</kbd> sections, <kbd>j</kbd>/<kbd>k</kbd> scroll)</td>
+                <td><kbd>F1</kbd></td>
+                <td>Open Help &amp; Shortcuts in the editor</td>
               </tr>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td>
-                <td>Split active pane right / split active pane down</td>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>I</kbd></td>
+                <td>Switch between terminal and editor</td>
               </tr>
               <tr>
-                <td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>/<kbd>J</kbd>/<kbd>K</kbd>/<kbd>L</kbd> (or Arrows)</td>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>O</kbd></td>
+                <td>Open the editor in a separate window</td>
+              </tr>
+              <tr>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>D</kbd> / <kbd>E</kbd></td>
+                <td>Split the terminal right / down</td>
+              </tr>
+              <tr>
+                <td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>H</kbd>/<kbd>J</kbd>/<kbd>K</kbd>/<kbd>L</kbd></td>
                 <td>Move focus between split panes</td>
               </tr>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>H</kbd>/<kbd>J</kbd>/<kbd>K</kbd>/<kbd>L</kbd> (or Arrows)</td>
-                <td>Resize active split pane</td>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> / <kbd>W</kbd></td>
+                <td>New tab / close the active tab</td>
               </tr>
               <tr>
-                <td><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>=</kbd></td>
-                <td>Equalize all split pane sizes</td>
+                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> / <kbd>V</kbd></td>
+                <td>Copy / paste</td>
               </tr>
               <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>W</kbd></td>
-                <td>New tab / close active split or tab</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd></td>
-                <td>Switch to next / previous tab</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd></td>
-                <td>Copy selection to clipboard / paste from clipboard</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>=</kbd> / <kbd>Ctrl</kbd> + <kbd>-</kbd> / <kbd>Ctrl</kbd> + <kbd>0</kbd></td>
-                <td>Increase / decrease / reset font size</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>,</kbd> (or <kbd>R</kbd>)</td>
-                <td>Live reload configuration file</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></td>
-                <td>Toggle legacy Zawgyi-One auto-conversion mode</td>
-              </tr>
-              <tr>
-                <td><kbd>Ctrl</kbd> + Left Click / <kbd>F11</kbd></td>
-                <td>Open URL under cursor / toggle fullscreen</td>
+                <td><kbd>Ctrl</kbd> + <kbd>=</kbd> / <kbd>-</kbd> / <kbd>0</kbd></td>
+                <td>Larger / smaller / reset font size</td>
               </tr>
             </tbody>
           </table>

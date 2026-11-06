@@ -355,11 +355,12 @@ impl Config {
                 let trimmed = line.trim();
                 if !trimmed.starts_with('#')
                     && let Some((k, _)) = trimmed.split_once('=')
-                        && k.trim() == "theme" {
-                            lines.push(format!("theme = {theme_name}"));
-                            theme_updated = true;
-                            continue;
-                        }
+                    && k.trim() == "theme"
+                {
+                    lines.push(format!("theme = {theme_name}"));
+                    theme_updated = true;
+                    continue;
+                }
                 lines.push(line.to_string());
             }
         }

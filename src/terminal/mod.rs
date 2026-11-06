@@ -37,6 +37,7 @@ pub enum AppEvent {
     ChildExited(u64),
     UpdateAvailable(crate::update::UpdateInfo),
     IpcEditorRequest(crate::ipc::IpcEditorRequest),
+    IpcSplitRequest(crate::ipc::IpcSplitRequest),
 }
 
 impl std::fmt::Debug for AppEvent {
@@ -53,6 +54,13 @@ impl std::fmt::Debug for AppEvent {
             }
             Self::IpcEditorRequest(request) => {
                 write!(f, "IpcEditorRequest(pane={})", request.pane_id)
+            }
+            Self::IpcSplitRequest(request) => {
+                write!(
+                    f,
+                    "IpcSplitRequest(pane={}, cmd={})",
+                    request.pane_id, request.command
+                )
             }
         }
     }

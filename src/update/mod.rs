@@ -61,36 +61,38 @@ pub fn running_version() -> String {
     if let Ok(output) = Command::new("dpkg-query")
         .args(["-W", "-f=${Version}", "ocean"])
         .output()
-        && output.status.success() {
-            let pkg_raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !pkg_raw.is_empty() {
-                let clean = pkg_raw
-                    .split('+')
-                    .next()
-                    .unwrap_or(&pkg_raw)
-                    .split('~')
-                    .next()
-                    .unwrap_or(&pkg_raw)
-                    .split('-')
-                    .next()
-                    .unwrap_or(&pkg_raw)
-                    .to_string();
-                if is_newer_version(&best_ver, &clean) {
-                    best_ver = clean;
-                }
+        && output.status.success()
+    {
+        let pkg_raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !pkg_raw.is_empty() {
+            let clean = pkg_raw
+                .split('+')
+                .next()
+                .unwrap_or(&pkg_raw)
+                .split('~')
+                .next()
+                .unwrap_or(&pkg_raw)
+                .split('-')
+                .next()
+                .unwrap_or(&pkg_raw)
+                .to_string();
+            if is_newer_version(&best_ver, &clean) {
+                best_ver = clean;
             }
         }
+    }
 
     // Check Fedora / RHEL / openSUSE rpm database
     if let Ok(output) = Command::new("rpm")
         .args(["-q", "--qf", "%{VERSION}", "ocean"])
         .output()
-        && output.status.success() {
-            let pkg_ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !pkg_ver.is_empty() && is_newer_version(&best_ver, &pkg_ver) {
-                best_ver = pkg_ver;
-            }
+        && output.status.success()
+    {
+        let pkg_ver = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !pkg_ver.is_empty() && is_newer_version(&best_ver, &pkg_ver) {
+            best_ver = pkg_ver;
         }
+    }
 
     best_ver
 }
@@ -154,9 +156,7 @@ pub fn parse_release_json(
         .ok_or_else(|| "Missing tag_name in release payload".to_string())?
         .trim();
 
-    let clean_version = tag_name
-        .trim_start_matches(['v', 'V'])
-        .to_string();
+    let clean_version = tag_name.trim_start_matches(['v', 'V']).to_string();
 
     if !is_newer_version(current_version, &clean_version) {
         return Ok(None);
@@ -479,20 +479,21 @@ pub fn start_background_update_check(
 
     // 1. Check local cache first (avoids hitting GitHub rate limits on frequent launches)
     if mode == UpdateCheckMode::Daily
-        && let Some((ts, cached)) = get_cached_update(&current_version) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let age_secs = now.saturating_sub(ts);
-            // Cache valid for 24 hours (86,400 seconds)
-            if age_secs < 86400 {
-                if let Some(info) = cached {
-                    let _ = proxy.send_event(crate::terminal::AppEvent::UpdateAvailable(info));
-                }
-                return;
+        && let Some((ts, cached)) = get_cached_update(&current_version)
+    {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let age_secs = now.saturating_sub(ts);
+        // Cache valid for 24 hours (86,400 seconds)
+        if age_secs < 86400 {
+            if let Some(info) = cached {
+                let _ = proxy.send_event(crate::terminal::AppEvent::UpdateAvailable(info));
             }
+            return;
         }
+    }
 
     // 2. Spawn lightweight background thread to query GitHub Releases API asynchronously
     std::thread::spawn(move || {

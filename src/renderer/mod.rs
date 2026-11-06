@@ -19,7 +19,7 @@ use crate::font::{FontStyle, FontSystem};
 use crate::help::{HelpDialog, SECTION_TITLES, StyledLine};
 use crate::menu::{ContextMenu, MenuEntry, ThemeSubEntry};
 use crate::menubar::MenuBar;
-use crate::split::{PaneLayout, SplitDivider};
+use crate::split::{PaneLayout, SplitDivider, pane_inset};
 use crate::statusbar::{
     STATUS_BAR_TEXT_SCALE, STATUS_BAR_VERTICAL_PAD, StatusBarContext, StatusBarGeometry, StatusMode,
 };
@@ -80,6 +80,38 @@ impl QuadInstance {
             uv_size: [0.0, 0.0],
             color,
             kind: 3.0,
+        }
+    }
+
+    #[inline]
+    pub fn rounded_solid(x: f32, y: f32, w: f32, h: f32, radius: f32, color: [f32; 4]) -> Self {
+        Self {
+            pos: [x, y],
+            size: [w, h],
+            uv_pos: [radius, 0.0],
+            uv_size: [0.0, 0.0],
+            color,
+            kind: 4.0,
+        }
+    }
+
+    #[inline]
+    pub fn rounded_hollow(
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radius: f32,
+        thickness: f32,
+        color: [f32; 4],
+    ) -> Self {
+        Self {
+            pos: [x, y],
+            size: [w, h],
+            uv_pos: [radius, thickness],
+            uv_size: [0.0, 0.0],
+            color,
+            kind: 5.0,
         }
     }
 }
@@ -173,12 +205,15 @@ impl RenderEngine {
         num_tabs: usize,
     ) -> (f32, f32, u16, u16) {
         let sf = scale_factor as f32;
-        let pad_l = config.window_padding_x.0 as f32 * sf;
-        let pad_r = config.window_padding_x.1 as f32 * sf;
+        let inset = pane_inset(scale_factor);
+        let pad_l = config.window_padding_x.0 as f32 * sf + inset;
+        let pad_r = config.window_padding_x.1 as f32 * sf + inset;
         let pad_t = config.window_padding_y.0 as f32 * sf
-            + Self::tab_bar_height(config, font_sys, num_tabs);
+            + Self::tab_bar_height(config, font_sys, num_tabs)
+            + inset;
         let pad_b = config.window_padding_y.1 as f32 * sf
-            + Self::status_bar_height(config, font_sys, scale_factor);
+            + Self::status_bar_height(config, font_sys, scale_factor)
+            + inset;
 
         let cw = font_sys.metrics.cell_width.max(1.0);
         let ch = font_sys.metrics.cell_height.max(1.0);
@@ -225,7 +260,7 @@ impl RenderEngine {
         confirm_dialog: Option<&ConfirmDialog>,
         menu_bar: Option<&MenuBar>,
         editor_menu_h: f32,
-        metrics: Option<&crate::metrics::ProcessMetrics>,
+        _metrics: Option<&crate::metrics::ProcessMetrics>,
     ) -> (&mut GlyphAtlas, &[QuadInstance]) {
         self.bg_instances.clear();
         self.fg_instances.clear();
@@ -324,7 +359,9 @@ impl RenderEngine {
                 context_menu,
                 help_dialog,
                 available_update,
-                metrics,
+                editor_focused: editor
+                    .as_ref()
+                    .is_some_and(|ed| ed.is_active() && ed.editor_focused),
             };
             self.emit_status_bar(
                 config,
@@ -384,6 +421,46 @@ impl RenderEngine {
         let num_rows = snapshot.rows;
         if num_cols == 0 || num_rows == 0 {
             return;
+        }
+
+        // Rounded pane surface + border. The split layout reserves an inner
+        // inset for terminal cells, so the border never overlaps text.
+        let bounds = pane.layout;
+        if bounds.bounds_w > 4.0 && bounds.bounds_h > 4.0 {
+            let sf = scale_factor as f32;
+            let radius = (9.0 * sf)
+                .round()
+                .min((bounds.bounds_w.min(bounds.bounds_h) * 0.24).max(2.0));
+            self.bg_instances.push(QuadInstance::rounded_solid(
+                bounds.bounds_x + 1.0,
+                bounds.bounds_y + 2.0,
+                bounds.bounds_w,
+                bounds.bounds_h,
+                radius,
+                [0.0, 0.0, 0.0, 0.18],
+            ));
+            self.bg_instances.push(QuadInstance::rounded_solid(
+                bounds.bounds_x,
+                bounds.bounds_y,
+                bounds.bounds_w,
+                bounds.bounds_h,
+                radius,
+                config.colors.foreground.to_f32_rgba(0.025),
+            ));
+            let border = if pane.is_active {
+                config.colors.cursor_color.to_f32_rgba(0.55)
+            } else {
+                config.colors.foreground.to_f32_rgba(0.12)
+            };
+            self.bg_instances.push(QuadInstance::rounded_hollow(
+                bounds.bounds_x,
+                bounds.bounds_y,
+                bounds.bounds_w,
+                bounds.bounds_h,
+                radius,
+                (1.5 * sf).max(1.0),
+                border,
+            ));
         }
 
         // Pass 1 & 2 per row: emit cell backgrounds into `bg_instances` and glyphs/decorations into `fg_instances`
@@ -585,9 +662,9 @@ impl RenderEngine {
                             .shaped_row_buf
                             .iter()
                             .find(|g| g.col == cur_c && g.is_myanmar)
-                        {
-                            custom_cursor_cx = Some((origin_x + g.x).round());
-                        }
+                    {
+                        custom_cursor_cx = Some((origin_x + g.x).round());
+                    }
                 }
             }
         }
@@ -669,7 +746,9 @@ impl RenderEngine {
                 1.0 - (snapshot.display_offset as f32 / snapshot.history_size.max(1) as f32);
             let thumb_y = origin_y + ratio * (track_h - thumb_h);
             let thumb_w = (4.0 * scale_factor as f32).round().max(3.0);
-            let thumb_x = pane.layout.bounds_x + pane.layout.bounds_w - thumb_w - 2.0;
+            let thumb_x = pane.layout.bounds_x + pane.layout.bounds_w
+                - thumb_w
+                - pane_inset(scale_factor) * 0.6;
             self.fg_instances.push(QuadInstance::solid(
                 thumb_x,
                 thumb_y,
@@ -2219,6 +2298,7 @@ impl RenderEngine {
         let raw_mode_bg = match geom.mode {
             StatusMode::Normal => config.colors.cursor_color,
             StatusMode::Tui => config.colors.ansi[6],
+            StatusMode::Editor => config.colors.ansi[4],
             StatusMode::Scroll => config.colors.ansi[3],
             StatusMode::Menu => config.colors.ansi[4],
             StatusMode::Theme => config.colors.ansi[5],
@@ -2421,7 +2501,7 @@ impl RenderEngine {
             );
         }
 
-        // 5b. Right resource usage pill (` 0.4% · 42M ` — click to toggle CPU / RAM detail)
+        // 5b. Right resource usage pill (` 0.4% · 0.2% · 42M ` — click to toggle CPU / RAM detail)
         if let Some(res) = &geom.resource_pill {
             let res_hov = status_hover_id == Some(6);
             let res_bg = if res_hov {
@@ -2706,6 +2786,7 @@ out vec2 v_uv;
 out vec2 v_local_px;
 out vec2 v_size_px;
 out vec4 v_color;
+flat out vec2 v_meta;
 flat out int v_kind;
 
 void main() {{
@@ -2717,6 +2798,7 @@ void main() {{
     v_local_px = corner * i_size;
     v_size_px = i_size;
     v_color = i_color;
+    v_meta = i_uv_pos;
     v_kind = int(i_kind + 0.5);
 }}
 "#
@@ -2728,6 +2810,7 @@ in vec2 v_uv;
 in vec2 v_local_px;
 in vec2 v_size_px;
 in vec4 v_color;
+flat in vec2 v_meta;
 flat in int v_kind;
 
 uniform sampler2D u_atlas;
@@ -2746,13 +2829,30 @@ void main() {{
         vec4 tex = texture(u_atlas, v_uv);
         float a = tex.a * v_color.a;
         f_color = vec4(tex.rgb * a, a);
-    }} else {{
+    }} else if (v_kind == 3) {{
         float bw = 1.5;
         bool edge = v_local_px.x < bw || v_local_px.x > (v_size_px.x - bw)
                  || v_local_px.y < bw || v_local_px.y > (v_size_px.y - bw);
         if (!edge) discard;
         float a = v_color.a;
         f_color = vec4(v_color.rgb * a, a);
+    }} else if (v_kind == 4 || v_kind == 5) {{
+        vec2 half_size = v_size_px * 0.5;
+        vec2 p = v_local_px - half_size;
+        float r = clamp(v_meta.x, 0.0, min(half_size.x, half_size.y));
+        vec2 q = abs(p) - half_size + vec2(r);
+        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+        float a;
+        if (v_kind == 4) {{
+            a = v_color.a * (1.0 - smoothstep(-1.0, 1.0, d));
+        }} else {{
+            float edge = abs(d) - max(v_meta.y, 1.0) * 0.5;
+            a = v_color.a * (1.0 - smoothstep(-0.7, 0.7, edge));
+        }}
+        if (a <= 0.001) discard;
+        f_color = vec4(v_color.rgb * a, a);
+    }} else {{
+        discard;
     }}
 }}
 "#
@@ -3027,6 +3127,28 @@ pub fn save_scene_png(
                             || ly < 1.5
                             || ly > inst.size[1] - 1.5;
                         if !edge {
+                            continue;
+                        }
+                        (inst.color[0], inst.color[1], inst.color[2], inst.color[3])
+                    }
+                    4 | 5 => {
+                        let half_w = inst.size[0] * 0.5;
+                        let half_h = inst.size[1] * 0.5;
+                        let px = lx - half_w;
+                        let py = ly - half_h;
+                        let radius = inst.uv_pos[0].clamp(0.0, half_w.min(half_h));
+                        let qx = px.abs() - half_w + radius;
+                        let qy = py.abs() - half_h + radius;
+                        let dist = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt()
+                            + qx.max(qy).min(0.0)
+                            - radius;
+                        let covered = if kind == 4 {
+                            dist <= 0.5
+                        } else {
+                            let thickness = inst.uv_pos[1].max(1.0);
+                            (dist.abs() - thickness * 0.5) <= 0.5
+                        };
+                        if !covered {
                             continue;
                         }
                         (inst.color[0], inst.color[1], inst.color[2], inst.color[3])
@@ -3494,7 +3616,7 @@ mod tests {
 
         let max_glyph_right = instances
             .iter()
-            .filter(|inst| inst.kind > 0.0 && inst.pos[1] < ch)
+            .filter(|inst| (inst.kind == 1.0 || inst.kind == 2.0) && inst.pos[1] < ch)
             .map(|inst| inst.pos[0] + inst.size[0])
             .fold(0.0_f32, f32::max);
 

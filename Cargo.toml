@@ -27,6 +27,7 @@ url = "2.5"
 swash = "0.2"
 unicode-width = "0.2"
 winit = "0.30"
+libc = "0.2"
 
 # Editor Extensions: Buffer & Unicode
 ropey = "1.6"
@@ -48,6 +49,14 @@ extism = "1.5"
 anyhow = "1.0"
 sha2 = "0.10"
 
+[[bin]]
+name = "ocean"
+path = "src/main.rs"
+
+[[bin]]
+name = "file"
+path = "src/bin/file.rs"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
@@ -65,6 +74,7 @@ section = "x11"
 priority = "optional"
 assets = [
     ["target/release/ocean", "usr/bin/", "755"],
+    ["target/release/file", "usr/bin/", "755"],
     ["packaging/linux/ocean.desktop", "usr/share/applications/", "644"],
     ["packaging/linux/ocean.metainfo.xml", "usr/share/metainfo/", "644"],
     ["assets/icons/ocean.svg", "usr/share/icons/hicolor/scalable/apps/ocean.svg", "644"],
@@ -83,6 +93,7 @@ assets = [
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/ocean", dest = "/usr/bin/ocean", mode = "755" },
+    { source = "target/release/file", dest = "/usr/bin/file", mode = "755" },
     { source = "packaging/linux/ocean.desktop", dest = "/usr/share/applications/ocean.desktop", mode = "644" },
     { source = "packaging/linux/ocean.metainfo.xml", dest = "/usr/share/metainfo/ocean.metainfo.xml", mode = "644" },
     { source = "assets/icons/ocean.svg", dest = "/usr/share/icons/hicolor/scalable/apps/ocean.svg", mode = "644" },

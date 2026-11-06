@@ -198,9 +198,11 @@ impl FontSystem {
         let mut myanmar = Vec::new();
         for face in self.db.faces() {
             if let Some((fam, _)) = face.families.first()
-                && face.monospaced && !mono.contains(fam) {
-                    mono.push(fam.clone());
-                }
+                && face.monospaced
+                && !mono.contains(fam)
+            {
+                mono.push(fam.clone());
+            }
         }
         mono.sort();
 
@@ -324,7 +326,11 @@ impl FontSystem {
             }
 
             // Lightweight symbol fallback (Nerd Fonts); heavy emoji is lazy-loaded on-demand when rendered
-            for &sym in &["Symbols Nerd Font Mono", "Symbols Nerd Font", "DejaVu Sans Mono"] {
+            for &sym in &[
+                "Symbols Nerd Font Mono",
+                "Symbols Nerd Font",
+                "DejaVu Sans Mono",
+            ] {
                 if let Some(id) =
                     self.query_and_load(Family::Name(sym), Weight::NORMAL, Style::Normal, false)
                 {

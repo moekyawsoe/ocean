@@ -2253,6 +2253,7 @@ dependencies = [
  "glutin-winit",
  "hashbrown 0.15.5",
  "ignore",
+ "libc",
  "log",
  "lsp-types",
  "nucleo-matcher",

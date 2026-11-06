@@ -11,6 +11,7 @@ use alacritty_terminal::selection::SelectionType;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::Rgb as VteRgb;
 use arboard::Clipboard;
+use glow::HasContext;
 use glutin::config::{ConfigTemplateBuilder, GlConfig};
 use glutin::context::{
     ContextApi, ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext, Version,
@@ -59,11 +60,24 @@ pub struct LaunchOptions {
 }
 
 struct GlState {
-    window: Window,
-    gl_context: PossiblyCurrentContext,
-    gl_surface: Surface<WindowSurface>,
+    // Drop GL resources before the X11 window. Reversing this order can make
+    // glutin destroy a GLX drawable that still references a dead window,
+    // producing `GLXBadWindow` on close.
     gl: glow::Context,
     renderer: GlRenderer,
+    gl_surface: Surface<WindowSurface>,
+    gl_context: PossiblyCurrentContext,
+    window: Window,
+}
+
+impl Drop for GlState {
+    fn drop(&mut self) {
+        self.renderer.destroy(&self.gl);
+        unsafe {
+            self.gl.finish();
+        }
+        let _ = self.gl_context.make_not_current_in_place();
+    }
 }
 
 struct Tab {
@@ -231,9 +245,10 @@ impl OceanApp {
             }
         } else if restored_session {
             if editor.workspace_dir.as_os_str().is_empty()
-                && let Some(ref cwd) = launch_cwd {
-                    editor.open_folder(cwd);
-                }
+                && let Some(ref cwd) = launch_cwd
+            {
+                editor.open_folder(cwd);
+            }
         } else if let Some(ref cwd) = launch_cwd {
             editor.open_folder(cwd);
         } else {
@@ -407,11 +422,11 @@ impl OceanApp {
 
         self.font_sys = Some(font_sys);
         self.gl_state = Some(GlState {
-            window,
-            gl_context,
-            gl_surface,
             gl,
             renderer,
+            gl_surface,
+            gl_context,
+            window,
         });
 
         self.spawn_new_tab(true)?;
@@ -567,6 +582,15 @@ impl OceanApp {
     }
 
     fn split_active_pane(&mut self, direction: SplitDirection) -> Result<(), String> {
+        self.split_active_pane_with_command(direction, None, None)
+    }
+
+    fn split_active_pane_with_command(
+        &mut self,
+        direction: SplitDirection,
+        cli_command: Option<(String, Vec<String>)>,
+        cwd_override: Option<PathBuf>,
+    ) -> Result<(), String> {
         let (Some(gl_state), Some(font_sys)) = (&self.gl_state, &self.font_sys) else {
             return Ok(());
         };
@@ -628,11 +652,11 @@ impl OceanApp {
             .map(|l| (l.cols, l.rows))
             .unwrap_or((40, 12));
 
-        let cwd = self.inherited_cwd(false);
+        let cwd = cwd_override.or_else(|| self.inherited_cwd(false));
         let session = TerminalSession::spawn(
             new_id,
             &self.config,
-            None,
+            cli_command,
             cwd,
             cols,
             rows,
@@ -819,6 +843,7 @@ impl OceanApp {
         } else {
             self.tabs.remove(tab_idx);
             if self.tabs.is_empty() {
+                drop(self.gl_state.take());
                 event_loop.exit();
                 return;
             }
@@ -849,6 +874,7 @@ impl OceanApp {
         let removed = self.tabs.remove(tab_idx);
         removed.shutdown_all();
         if self.tabs.is_empty() {
+            drop(self.gl_state.take());
             event_loop.exit();
             return;
         }
@@ -959,7 +985,7 @@ impl OceanApp {
             context_menu: self.context_menu.as_ref(),
             help_dialog: self.help_dialog.as_ref(),
             available_update: self.available_update.as_ref(),
-            metrics: Some(&self.metrics),
+            editor_focused: self.editor.is_active() && self.editor.editor_focused,
         };
         StatusBarGeometry::compute(
             &self.config,
@@ -1066,10 +1092,11 @@ impl OceanApp {
                 self.apply_theme_preview(&theme_id);
             }
         } else if let Some(orig) = &self.theme_before_preview
-            && &self.config.theme_name != orig {
-                let orig_clone = orig.clone();
-                self.apply_theme_preview(&orig_clone);
-            }
+            && &self.config.theme_name != orig
+        {
+            let orig_clone = orig.clone();
+            self.apply_theme_preview(&orig_clone);
+        }
     }
 
     fn apply_theme_preview(&mut self, name: &str) {
@@ -1083,9 +1110,10 @@ impl OceanApp {
     fn close_context_menu(&mut self) {
         self.context_menu = None;
         if let Some(orig) = self.theme_before_preview.take()
-            && self.config.theme_name != orig {
-                self.apply_theme(&orig);
-            }
+            && self.config.theme_name != orig
+        {
+            self.apply_theme(&orig);
+        }
     }
 
     fn apply_theme(&mut self, name: &str) {
@@ -1582,6 +1610,31 @@ impl OceanApp {
         }
     }
 
+    fn handle_ipc_split_request(&mut self, request: crate::ipc::IpcSplitRequest) {
+        if let Some(tab_idx) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.panes.iter().any(|pane| pane.id == request.pane_id))
+        {
+            self.active_tab = tab_idx;
+            if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                tab.active_pane_id = request.pane_id;
+            }
+        }
+
+        let direction = match request.direction.as_deref() {
+            Some("down") | Some("bottom") | Some("vertical") => SplitDirection::Down,
+            Some("right") | Some("horizontal") => SplitDirection::Right,
+            _ => SplitDirection::Auto,
+        };
+
+        let cwd = request.cwd.map(PathBuf::from);
+        let cmd = Some((request.command, request.args));
+        if let Err(err) = self.split_active_pane_with_command(direction, cmd, cwd) {
+            log::warn!("Failed to split pane for IPC request: {err}");
+        }
+    }
+
     fn open_menubar(&mut self, index: usize) {
         self.menubar = MenuBar::build(self.editor.recent_files());
         self.menubar.open_menu(index);
@@ -1717,9 +1770,7 @@ impl OceanApp {
         if let Some(path) = &self.ipc_socket {
             let _ = std::fs::remove_file(path);
         }
-        if let Some(gl_state) = self.gl_state.take() {
-            gl_state.renderer.destroy(&gl_state.gl);
-        }
+        drop(self.gl_state.take());
         event_loop.exit();
     }
 
@@ -1846,52 +1897,54 @@ impl OceanApp {
         }
 
         // Anchor IME to editor cursor when editor is active and focused
-        if self.editor.is_active() && self.editor.editor_focused
-            && let Some(ed_viewport) = ed_vp {
-                let gutter_digits = (self.editor.active_doc().buffer.len_lines() + 1)
-                    .to_string()
-                    .len()
-                    .max(3);
-                let line_h = font_sys.metrics.cell_height;
-                let gutter_w = (gutter_digits as f32 + 3.0) * font_sys.metrics.cell_width;
-                let (rel_cx, rel_cy) = self
-                    .editor
-                    .active_doc()
-                    .cursor_visual_pos(font_sys, gutter_w);
-                let ed_tab_h = crate::editor::EditorWorkspace::editor_tab_height(line_h);
-                let crumb_h = self.editor.breadcrumb_height(line_h);
-                let activity_w = if self.editor.activity_bar_visible {
-                    44.0 * self.editor.ui_scale
+        if self.editor.is_active()
+            && self.editor.editor_focused
+            && let Some(ed_viewport) = ed_vp
+        {
+            let gutter_digits = (self.editor.active_doc().buffer.len_lines() + 1)
+                .to_string()
+                .len()
+                .max(3);
+            let line_h = font_sys.metrics.cell_height;
+            let gutter_w = (gutter_digits as f32 + 3.0) * font_sys.metrics.cell_width;
+            let (rel_cx, rel_cy) = self
+                .editor
+                .active_doc()
+                .cursor_visual_pos(font_sys, gutter_w);
+            let ed_tab_h = crate::editor::EditorWorkspace::editor_tab_height(line_h);
+            let crumb_h = self.editor.breadcrumb_height(line_h);
+            let activity_w = if self.editor.activity_bar_visible {
+                44.0 * self.editor.ui_scale
+            } else {
+                0.0
+            };
+            let panel_open = self.editor.explorer.visible
+                && (self.editor.active_panel == crate::editor::SidebarPanel::Problems
+                    || self.editor.explorer.is_open());
+            let sidebar_w = if panel_open {
+                if self.editor.active_panel == crate::editor::SidebarPanel::Problems {
+                    self.editor
+                        .explorer
+                        .width
+                        .max(230.0)
+                        .min((ed_viewport.w - 160.0).max(80.0))
                 } else {
-                    0.0
-                };
-                let panel_open = self.editor.explorer.visible
-                    && (self.editor.active_panel == crate::editor::SidebarPanel::Problems
-                        || self.editor.explorer.is_open());
-                let sidebar_w = if panel_open {
-                    if self.editor.active_panel == crate::editor::SidebarPanel::Problems {
-                        self.editor
-                            .explorer
-                            .width
-                            .max(230.0)
-                            .min((ed_viewport.w - 160.0).max(80.0))
-                    } else {
-                        self.editor
-                            .explorer
-                            .width
-                            .min(ed_viewport.w - 100.0)
-                            .max(80.0)
-                    }
-                } else {
-                    0.0
-                };
-                let code_x = ed_viewport.x + activity_w + sidebar_w;
-                let abs_cx = (code_x + rel_cx).round().max(0.0) as u32;
-                let abs_cy = (ed_viewport.y + self.editor.menu_height + ed_tab_h + crumb_h + rel_cy)
-                    .round()
-                    .max(0.0) as u32;
-                active_ime_px = Some((abs_cx, abs_cy));
-            }
+                    self.editor
+                        .explorer
+                        .width
+                        .min(ed_viewport.w - 100.0)
+                        .max(80.0)
+                }
+            } else {
+                0.0
+            };
+            let code_x = ed_viewport.x + activity_w + sidebar_w;
+            let abs_cx = (code_x + rel_cx).round().max(0.0) as u32;
+            let abs_cy = (ed_viewport.y + self.editor.menu_height + ed_tab_h + crumb_h + rel_cy)
+                .round()
+                .max(0.0) as u32;
+            active_ime_px = Some((abs_cx, abs_cy));
+        }
 
         // Keep IME candidate popup anchored cleanly to the active split pane's cursor
         if let Some((cur_px_x, cur_px_y)) = active_ime_px
@@ -2036,6 +2089,7 @@ impl ApplicationHandler<AppEvent> for OceanApp {
         if self.gl_state.is_none() {
             if let Err(err) = self.init_window_and_gl(event_loop) {
                 eprintln!("ocean fatal error: {err}");
+                drop(self.gl_state.take());
                 event_loop.exit();
             }
         } else {
@@ -2111,6 +2165,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
             }
             AppEvent::IpcEditorRequest(request) => {
                 self.handle_ipc_editor_request(request);
+            }
+            AppEvent::IpcSplitRequest(request) => {
+                self.handle_ipc_split_request(request);
             }
             AppEvent::ChildExited(pane_id) => {
                 self.close_pane_by_id(pane_id, event_loop);
@@ -2273,6 +2330,11 @@ impl ApplicationHandler<AppEvent> for OceanApp {
 
                 // 0. Keyboard navigation inside open Help & Documentation dialog
                 if self.help_dialog.is_some() {
+                    if matches!(event.logical_key, Key::Named(NamedKey::F1)) {
+                        self.help_dialog = None;
+                        self.request_redraw();
+                        return;
+                    }
                     if let Some(action) =
                         match_keybind(&self.config.keybinds, &event.logical_key, self.modifiers)
                             .cloned()
@@ -2369,6 +2431,20 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                     }
                 }
 
+                if self.editor.is_active()
+                    && (self.editor.editor_focused
+                        || self.editor.mode == crate::editor::WorkspaceMode::PureEditor)
+                    && matches!(event.logical_key, Key::Named(NamedKey::F1))
+                    && !self.modifiers.control_key()
+                    && !self.modifiers.alt_key()
+                    && !self.modifiers.shift_key()
+                {
+                    self.close_context_menu();
+                    self.help_dialog = Some(HelpDialog::new());
+                    self.request_redraw();
+                    return;
+                }
+
                 // Check global workspace toggle & window lifecycle keybinds first
                 if let Some(action) =
                     match_keybind(&self.config.keybinds, &event.logical_key, self.modifiers)
@@ -2380,11 +2456,12 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             | Action::ToggleFullscreen
                             | Action::Quit
                             | Action::ReloadConfig
-                    ) {
-                        self.close_context_menu();
-                        self.execute_action(action, event_loop);
-                        return;
-                    }
+                    )
+                {
+                    self.close_context_menu();
+                    self.execute_action(action, event_loop);
+                    return;
+                }
 
                 // If code editor is active and focused, route keys to the editor
                 if self.editor.is_active()
@@ -2402,18 +2479,19 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                             &mut self.clipboard,
                             &ws_dir,
                             self.proxy.clone(),
-                        ) {
-                            if self.editor.take_close_confirm() {
-                                self.open_close_document_confirm();
-                            }
-                            if let Some(count) = self.editor.take_replace_all_request() {
-                                self.confirm_dialog = Some(ConfirmDialog::replace_all(count));
-                            }
-                            self.reset_cursor_blink();
-                            self.sync_ime_policy();
-                            self.request_redraw();
-                            return;
+                        )
+                    {
+                        if self.editor.take_close_confirm() {
+                            self.open_close_document_confirm();
                         }
+                        if let Some(count) = self.editor.take_replace_all_request() {
+                            self.confirm_dialog = Some(ConfirmDialog::replace_all(count));
+                        }
+                        self.reset_cursor_blink();
+                        self.sync_ime_policy();
+                        self.request_redraw();
+                        return;
+                    }
                 }
 
                 // Check configured Ghostty-style keybinds
@@ -2752,9 +2830,9 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         && self
                             .editor
                             .update_scrollbar_hover(px, py, &ed_vp, tab_h, font_sys)
-                        {
-                            self.request_redraw();
-                        }
+                    {
+                        self.request_redraw();
+                    }
                 }
 
                 let (layouts, dividers) = self.active_tab_layout();
@@ -3005,10 +3083,6 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                                                 true,
                                             );
                                         }
-                                    }
-                                    StatusClickTarget::ToggleMetricsDetail => {
-                                        self.metrics.toggle_detail();
-                                        self.request_redraw();
                                     }
                                 }
                             }
@@ -3531,16 +3605,17 @@ impl ApplicationHandler<AppEvent> for OceanApp {
                         && px <= ed_vp.x + ed_vp.w
                         && py >= ed_vp.y
                         && py <= ed_vp.y + ed_vp.h
-                        && let Some(font_sys) = &mut self.font_sys {
-                            let multiplier = self.config.mouse_scroll_multiplier;
-                            if self
-                                .editor
-                                .handle_scroll(delta, font_sys, px, py, &ed_vp, multiplier)
-                            {
-                                self.request_redraw();
-                            }
-                            return;
+                        && let Some(font_sys) = &mut self.font_sys
+                    {
+                        let multiplier = self.config.mouse_scroll_multiplier;
+                        if self
+                            .editor
+                            .handle_scroll(delta, font_sys, px, py, &ed_vp, multiplier)
+                        {
+                            self.request_redraw();
                         }
+                        return;
+                    }
                 }
 
                 let cell_h = self

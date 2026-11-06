@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ocean Code Editor — Documentation | GPU Editor with LSP, WASM Plugins &amp; Myanmar Shaping</title>
+  <title>Ocean Code Editor — Documentation | Git, LSP &amp; Myanmar</title>
   <meta
     name="description"
-    content="Complete documentation for Ocean's built-in GPU code editor: workspace modes, modeless shortcuts, file explorer, fuzzy command palette, LSP, syntax highlighting, Myanmar grapheme editing, and sandboxed WASM plugins."
+    content="Documentation for Ocean's built-in code editor: windows, shortcuts, search, Git changes, LSP, and Myanmar editing."
   />
   <link rel="icon" type="image/svg+xml" href="./assets/ocean.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -23,7 +23,7 @@
       <a href="./index.html" class="brand">
         <img src="./assets/ocean.svg" alt="Ocean Terminal Logo" class="brand-logo" />
         <span>Ocean</span>
-        <span class="brand-badge">Rust + OpenGL</span>
+        <span class="brand-badge">Fast &amp; lightweight</span>
       </a>
 
       <nav class="main-nav" aria-label="Primary Navigation">
@@ -55,19 +55,18 @@
       <div class="docs-breadcrumb">
         <a href="./index.html">Home</a><span>/</span>Documentation<span>/</span>Code Editor
       </div>
-      <div class="section-eyebrow">Built-in IDE</div>
-      <h1>A GPU code editor that lives <em>inside</em> your terminal.</h1>
+      <div class="section-eyebrow">Code editor</div>
+      <h1>A clean code editor, built into your terminal.</h1>
       <p class="lead">
-        Ocean ships a native, modeless code editor rendered directly on its instanced OpenGL pipeline — no TUI
-        abstractions, no external window, no Electron. Edit files at terminal speed, split them next to your shell, and
-        keep full Myanmar/Burmese shaping while you type.
+        Edit files, search, check Git, and run your shell without switching apps. It follows your Ocean theme and font,
+        with full Myanmar support while you type.
       </p>
       <div class="docs-meta-row">
-        <span class="docs-meta-pill">ropey B-tree buffer</span>
-        <span class="docs-meta-pill">Asynchronous LSP</span>
-        <span class="docs-meta-pill">Fuzzy command palette</span>
-        <span class="docs-meta-pill">Sandboxed WASM plugins</span>
-        <span class="docs-meta-pill">Myanmar grapheme clusters</span>
+        <span class="docs-meta-pill">Tabs &amp; explorer</span>
+        <span class="docs-meta-pill">Command palette</span>
+        <span class="docs-meta-pill">Search &amp; replace</span>
+        <span class="docs-meta-pill">Git changes &amp; blame</span>
+        <span class="docs-meta-pill">Myanmar ready</span>
       </div>
       <div class="hero-cta-row">
         <a href="./index.html#download" class="btn btn-primary">Download Ocean</a>
@@ -97,7 +96,7 @@
           <a href="#palette">Command palette</a>
           <a href="#languages">Languages &amp; LSP</a>
           <a href="#myanmar">Myanmar editing</a>
-          <a href="#plugins">WASM plugins</a>
+          <a href="#plugins">Plugins</a>
           <a href="#mouse">Mouse &amp; navigation</a>
           <a href="#customize">Customization</a>
         </nav>
@@ -107,22 +106,16 @@
         <section class="docs-section" id="overview">
           <h2>Overview</h2>
           <p>
-            The editor is part of the same binary as the terminal. It reuses Ocean's OpenGL renderer, font system, theme
-            palette, and event loop, so in-place switching between a shell and a source file is instant with no separate
-            configuration. <code>edit [PATH]</code> opens a separate editor window by default; use <code>edit --here</code>
-            to switch the current window instead.
+            The editor is built into Ocean and follows your theme, font, and workspace. It opens in its own window by
+            default; use <code>edit --here</code> to switch the current window instead.
           </p>
           <ul>
-            <li><strong>Native GPU pipeline.</strong> Cells, glyphs, gutters, tabs, popups, and squiggles are drawn through Ocean's instanced <code>glow</code>/<code>glutin</code> renderer.</li>
-            <li><strong>Rope-backed buffers.</strong> <code>ropey</code> keeps edits at O(log N), so multi-megabyte files stay responsive, with a transaction-based undo/redo stack that restores cursor positions.</li>
-            <li><strong>Modeless editing.</strong> Familiar developer bindings — <kbd>Ctrl</kbd>+<kbd>S</kbd>, <kbd>Ctrl</kbd>+<kbd>P</kbd>, <kbd>Ctrl</kbd>+<kbd>F</kbd>, <kbd>Ctrl</kbd>+<kbd>Z</kbd> — with no modal state to think about.</li>
-            <li><strong>Cluster-aware text.</strong> Cursor movement, selection, and deletion operate on shaped grapheme clusters, which keeps Burmese syllables intact.</li>
-            <li><strong>Built-in tooling.</strong> File explorer, fuzzy file/command palette, find bar, LSP completion and hover, diagnostics, and Extism plugins.</li>
+            <li><strong>Everything in one window:</strong> tabs, file explorer, command palette, search, and problems.</li>
+            <li><strong>Helpful language tools:</strong> syntax highlighting, LSP completion, diagnostics, and hover.</li>
+            <li><strong>Git built in:</strong> changes panel, gutter markers, diff view, and inline blame.</li>
+            <li><strong>Myanmar-ready:</strong> cursor movement, selection, and deletion keep Burmese syllables intact.</li>
+            <li><strong>Easy on the eyes:</strong> follows your Ocean theme, font, and editor font scale.</li>
           </ul>
-          <div class="docs-note">
-            <strong>Tip:</strong> The editor follows the active Ocean theme and font settings. Switch themes live with
-            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Switch Theme</strong> and the editor recolors immediately.
-          </div>
         </section>
 
         <section class="docs-section" id="launching">
@@ -137,14 +130,11 @@
                 <tr><th>Entry point</th><th>How</th></tr>
               </thead>
               <tbody>
-                <tr><td><code>ocean edit [PATH]</code></td><td>Open a file, or a folder as the workspace, in a <strong>separate editor window</strong>. No path opens the current directory.</td></tr>
-                <tr><td><code>edit [PATH]</code></td><td>Standalone launcher installed as an <code>ocean</code> symlink by the <code>.deb</code> and <code>.rpm</code> packages; opens a separate editor window.</td></tr>
-                <tr><td><code>edit --here [PATH]</code></td><td>Switches the <strong>current Ocean window</strong> into Pure Editor mode via local IPC instead of opening a new window.</td></tr>
-                <tr><td><code>ocean +editor-window [PATH]</code></td><td>Explicitly opens a <strong>separate editor window</strong> and leaves the terminal window untouched.</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Toggle Pure Editor mode (Mode C) from a running session.</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open the current file/workspace in a separate editor window.</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Toggle Split mode (Mode B): editor on top, terminal on the bottom.</td></tr>
-                <tr><td>Context Menu</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → <strong>Toggle Code Editor</strong> (mnemonic <kbd>i</kbd>).</td></tr>
+                <tr><td><code>ocean edit [PATH]</code></td><td>Open a file or folder in a <strong>separate editor window</strong>. No path opens the current directory.</td></tr>
+                <tr><td><code>edit --here [PATH]</code></td><td>Open the editor in the <strong>current Ocean window</strong> instead.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd></td><td>Switch between terminal and editor in the current window.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>Open the current file or workspace in a separate editor window.</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>Split the window: editor on top, terminal below.</td></tr>
               </tbody>
             </table>
           </div>
@@ -154,24 +144,19 @@
               <span>Launch examples</span>
               <button type="button" class="copy-btn" data-copy-target="docs-launch">Copy</button>
             </div>
-            <pre id="docs-launch"><span class="tok-comment"># Open a file directly</span>
+            <pre id="docs-launch"><span class="tok-comment"># Open a file in a separate editor window</span>
 <span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> src/main.rs
 
-<span class="tok-comment"># Open a folder as the workspace (enables Ctrl+P file finder and Ctrl+B explorer)</span>
+<span class="tok-comment"># Open a folder as the workspace</span>
 <span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> .
 
-<span class="tok-comment"># Standalone launcher installed by the .deb / .rpm packages</span>
-<span class="tok-cmd">edit</span> src/main.rs
-
-<span class="tok-comment"># Start a shell in the parent terminal tab while editing (Mode B)</span>
-<span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> .</pre>
+<span class="tok-comment"># Open in the current window instead</span>
+<span class="tok-cmd">ocean</span> <span class="tok-flag">edit</span> <span class="tok-flag">--here</span> .</pre>
           </div>
 
           <div class="docs-note">
-            <strong>No second window from inside Ocean.</strong> Each shell inherits an <code>OCEAN_SOCKET</code> and
-            <code>OCEAN_PANE_ID</code>; running <code>edit</code> sends a request to the owning window, which switches
-            that pane's window to the editor and opens the requested file or folder. From outside Ocean it reuses the
-            most recently active Ocean window if one is running; otherwise it starts a normal editor window.
+            <strong>Separate window by default.</strong> Use <code>--here</code> when you want the editor in the current
+            window.
           </div>
         </section>
 
@@ -186,21 +171,21 @@
             <article class="mode-card">
               <div class="mode-tag">Mode A</div>
               <h4>Pure Terminal</h4>
-              <p>The default Ocean experience. The editor keeps your documents in memory while hidden.</p>
+              <p>The default Ocean view. Your editor documents stay open in the background.</p>
               <div class="mode-keys"><kbd>Ctrl</kbd><kbd>\</kbd><span class="shortcut-hint">to reopen Split</span></div>
             </article>
 
             <article class="mode-card">
               <div class="mode-tag">Mode B</div>
               <h4>Split</h4>
-              <p>Editor on top, live PTY terminal below. Drag the divider to resize; the ratio is clamped between 15% and 85%.</p>
+              <p>Editor on top and a live terminal below. Drag the divider to resize.</p>
               <div class="mode-keys"><kbd>Ctrl</kbd><kbd>\</kbd></div>
             </article>
 
             <article class="mode-card">
               <div class="mode-tag">Mode C</div>
               <h4>Pure Editor</h4>
-              <p>The editor fills the window with its own tab bar, gutter, and status bar for focused work.</p>
+              <p>The editor fills the window for focused work.</p>
               <div class="mode-keys"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>I</kbd></div>
             </article>
           </div>
@@ -243,45 +228,23 @@
                 <tr><th>Shortcut</th><th>Action</th></tr>
               </thead>
               <tbody>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active document to disk</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd></td><td>Open the Neovim-style bottom <code>:</code> command palette / fuzzy file finder</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>B</kbd></td><td>Show / hide the file explorer sidebar</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Open workspace search and replace</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Open Git changes and refresh status</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Neovim-style bottom <code>/</code> search line (<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd> cycle matches, <kbd>Esc</kbd> closes)</td></tr>
-                <tr><td><kbd>Alt</kbd>+<kbd>Click</kbd></td><td>Add a cursor; <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd> adds one above or below</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Trigger LSP autocompletion (<kbd>Up</kbd>/<kbd>Down</kbd> navigate, <kbd>Enter</kbd>/<kbd>Tab</kbd> accept, <kbd>Esc</kbd> dismiss)</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Hover documentation for the symbol under the cursor</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo the last edit transaction, restoring the cursor</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Y</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>Redo</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Ctrl</kbd>+<kbd>X</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Copy / cut / paste using the system clipboard</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Close the active document tab</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / previous open document</td></tr>
-                <tr><td><kbd>Tab</kbd></td><td>Insert four spaces</td></tr>
-                <tr><td><kbd>Enter</kbd></td><td>Insert a newline and copy the current line's leading indentation</td></tr>
-                <tr><td><kbd>Esc</kbd></td><td>Dismiss the palette, find bar, completion, or hover popup</td></tr>
+                <tr><td><kbd>F1</kbd></td><td>Open Help &amp; Shortcuts</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>Command palette and file finder</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save the active document</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>F</kbd></td><td>Find in the current file</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd></td><td>Search and replace across the workspace</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd></td><td>Open Git changes</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>5</kbd></td><td>Explorer / Search / Problems / Plugins / Git</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>W</kbd></td><td>Close the active tab</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Next / previous document</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Close the palette, find bar, or popup</td></tr>
               </tbody>
             </table>
           </div>
 
-          <h3>Workspace search &amp; multi-cursor</h3>
           <p>
-            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> or the <strong>Search</strong> activity-bar icon opens the
-            workspace search panel. Type a query and press <kbd>Enter</kbd>; use <kbd>Tab</kbd> to switch between the
-            find and replace fields, and <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to replace every match after a confirmation
-            dialog. <strong>Aa</strong> toggles case sensitivity and <strong>W</strong> toggles whole-word matching.
-            Results are clickable <code>file:line</code> rows and respect <code>.gitignore</code>.
+            Add a second cursor with <kbd>Alt</kbd>+<kbd>Click</kbd>. <kbd>Esc</kbd> clears extra cursors.
           </p>
-          <p>
-            Add cursors with <kbd>Alt</kbd>+<kbd>Click</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Up</kbd>/<kbd>Down</kbd>.
-            Typing, <kbd>Backspace</kbd>, <kbd>Delete</kbd>, paste, and arrow movement apply to every cursor;
-            <kbd>Esc</kbd> clears the extra cursors. The status bar shows the active cursor count.
-          </p>
-
-          <div class="docs-note">
-            The editor consumes editing keys only while it has focus. Global terminal bindings that are not used by the
-            editor — split management, tabs, font sizing — continue to work as usual.
-          </div>
         </section>
 
         <section class="docs-section" id="vim">
@@ -304,44 +267,24 @@
             </table>
           </div>
 
-          <h3>Motions and operators</h3>
-          <ul>
-            <li><kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> and arrows move the cursor; counts work as expected (<code>3j</code>, <code>5l</code>).</li>
-            <li><code>w</code> <code>b</code> <code>e</code> move by word; <code>0</code> <code>^</code> <code>$</code> target line bounds; <code>gg</code> and <code>G</code> jump to the first/last line.</li>
-            <li><code>d</code>, <code>y</code>, and <code>c</code> accept motions: <code>dd</code>, <code>dw</code>, <code>d$</code>, <code>dj</code>, <code>dk</code>, <code>cw</code>.</li>
-            <li><code>x</code>, <code>X</code>, <code>p</code>, <code>P</code>, <code>J</code>, <code>r</code>, and <code>~</code> handle character edits, paste, join, replace, and case toggling.</li>
-            <li><kbd>u</kbd> and <kbd>Ctrl</kbd>+<kbd>r</kbd> undo and redo; Visual <code>d/y/c</code> operate on the selection.</li>
-            <li>Deletion and cursor motion stay grapheme-cluster aware, so <code>x</code> removes a whole Myanmar syllable.</li>
-          </ul>
-
-          <div class="docs-note">
-            The editor status strip shows the current mode, pending count/operator, command line, and any Ex error
-            message. In Normal/Visual mode every key is consumed by the editor so it never reaches the terminal.
-          </div>
+          <p>
+            Supports familiar motions, counts, operators, Visual selections, undo/redo, and <code>:w</code> /
+            <code>:q</code> commands. Burmese syllables stay intact during deletion.
+          </p>
         </section>
 
         <section class="docs-section" id="interface">
           <h2>Interface</h2>
           <p>
-            The editor uses a VSCode-inspired layout with a single set of chrome elements that stay consistent across
-            Split and Pure Editor modes.
+            A simple, focused layout that stays the same in Split and Pure Editor modes.
           </p>
           <ul>
-            <li><strong>Document tabs</strong> are always visible, with an active accent, unsaved dirty dot, per-tab close button, and a <code>+</code> button for a new document.</li>
-            <li><strong>Breadcrumbs</strong> below the tabs show the active file path relative to the workspace root.</li>
-            <li><strong>Menu bar</strong> at the top of the editor (F10 or mouse) with File / Edit / View / Go / Help, recent files, quick open, find, view toggles, and split actions.</li>
-            <li><strong>Activity bar</strong> uses Nerd Font glyphs for <strong>Explorer</strong>, <strong>Search</strong>, <strong>Problems</strong>, <strong>Plugins</strong>, and <strong>Git</strong>; the search icon opens the workspace search panel, while <kbd>Ctrl</kbd>+<kbd>P</kbd> remains the command palette.</li>
-            <li><strong>Nerd Font icons</strong> render UI and file-type symbols from the active patched font and tint them by theme/language. Bundled PNGs are used automatically if no Nerd Font is installed.</li>
-            <li><strong>File-type icons</strong> appear on tabs, breadcrumbs, and explorer rows (Rust, TypeScript, JavaScript, Python, Go, C/C++, HTML, CSS, JSON, TOML, Markdown, Shell, Docker).</li>
-            <li><strong>Plugins panel</strong> lists installed plugins with version and enabled state; click a row to enable/disable it.</li>
-            <li><strong>Session restore &amp; autosave</strong> reopen documents, cursor positions, scroll offsets, and the workspace on launch. Dirty/untitled buffers are snapshotted every 15 seconds and recovered after a crash.</li>
-            <li><strong>Git panel</strong> (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>) lists the current branch, modified/untracked files, and staged state; click a row to open it. Gutter markers show changed lines, and the current line displays inline blame. The command palette can open the current file's diff against <code>HEAD</code>.</li>
-            <li><strong>Problems panel</strong> lists diagnostics across open documents; click an entry to open the file and jump to the line.</li>
-            <li><strong>Status bar</strong> shows the mode, file, error/warning counts, cursor position, language, and LSP state. It renders at 80% of the terminal font size by default.</li>
-            <li><strong>Unsaved-work dialog</strong> appears before closing a dirty document, closing the last tab/pane, quitting, or pressing the window close button. Choices are <strong>Save</strong> / <strong>Discard</strong> / <strong>Cancel</strong> (or <strong>Save All</strong> / <strong>Discard All</strong> / <strong>Cancel</strong>); <kbd>Esc</kbd> always cancels. <code>:q!</code> is the explicit force-discard.</li>
-            <li><strong>Code surface</strong> adds a full-width current-line highlight, indent guides, matching-bracket highlights, and cluster-aware selection.</li>
-            <li><strong>Command palette</strong> dims the editor behind a wider modal panel.</li>
-            <li><strong>Pure Editor</strong> hides the terminal tab bar and global shortcut bar, leaving one top tab row and one bottom status bar.</li>
+            <li><strong>Tabs and breadcrumbs</strong> show open files and the current path.</li>
+            <li><strong>Activity bar:</strong> Explorer, Search, Problems, Plugins, and Git.</li>
+            <li><strong>Git:</strong> branch and changed files, gutter markers, diff view, and inline blame.</li>
+            <li><strong>Status bar:</strong> line/column, errors and warnings, language, and branch.</li>
+            <li><strong>Clear dialogs:</strong> save or discard unsaved work before closing a file or the app.</li>
+            <li><strong>Nerd Font icons</strong> with automatic PNG fallback.</li>
           </ul>
         </section>
 
@@ -352,170 +295,84 @@
             with <code>ocean edit &lt;dir&gt;</code> (or the inherited shell working directory).
           </p>
           <ul>
-            <li><strong>Click a directory</strong> to expand or collapse it; <strong>click a file</strong> to open it in a new tab.</li>
-            <li><strong>Click the header</strong> to rescan the workspace after files change on disk.</li>
-            <li><strong>Drag the right edge</strong> of the sidebar to resize it. The default width is 210 px with an 80 px minimum.</li>
-            <li><strong>Mouse wheel</strong> scrolls the tree independently of the editor buffer.</li>
-            <li>Noisy directories — <code>.git</code>, <code>target</code>, <code>node_modules</code>, <code>.cache</code>, and <code>.DS_Store</code> — are skipped automatically.</li>
+            <li>Click a folder to expand it, or a file to open it.</li>
+            <li>Click the header to rescan the workspace.</li>
+            <li>Drag the right edge to resize the sidebar.</li>
           </ul>
         </section>
 
         <section class="docs-section" id="palette">
           <h2>Command palette &amp; file finder</h2>
           <p>
-            Press <kbd>Ctrl</kbd>+<kbd>P</kbd> for a single fuzzy entry point powered by <code>nucleo-matcher</code>.
-            Typing filters both built-in commands and workspace files, ranked by match quality.
+            Press <kbd>Ctrl</kbd>+<kbd>P</kbd> or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> for a bottom <code>:</code>
+            prompt that finds files and runs commands.
           </p>
           <ul>
-            <li><strong>File search</strong> walks the workspace up to eight levels deep, respecting <code>.gitignore</code> and hidden-file rules.</li>
-            <li><strong>Built-in commands</strong> include Save, New Document, Close Document, Find, Toggle Explorer, Toggle Split, Pure Editor, Pure Terminal, Trigger Autocompletion, and plugin reload.</li>
-            <li><strong>Plugin commands</strong> registered through the WASM host appear alongside built-ins.</li>
-            <li><kbd>Up</kbd>/<kbd>Down</kbd> move the selection, <kbd>Enter</kbd> executes, <kbd>Backspace</kbd> edits the query, and <kbd>Esc</kbd> dismisses.</li>
+            <li>Type to filter files and actions.</li>
+            <li><kbd>Enter</kbd> runs, <kbd>Esc</kbd> closes.</li>
           </ul>
         </section>
 
         <section class="docs-section" id="languages">
           <h2>Languages &amp; LSP</h2>
           <p>
-            Syntax highlighting is selected automatically from the file extension, with a few filename special cases:
-            <code>Cargo.toml</code> and <code>config</code> use TOML, while <code>Dockerfile</code> uses Shell.
+            Syntax highlighting works out of the box. Install a language server for completion, hover, and diagnostics.
           </p>
 
           <div class="docs-table-wrap">
             <table class="docs-table">
               <thead>
-                <tr><th>Language</th><th>Extensions</th><th>Language server</th></tr>
+                <tr><th>Language</th><th>Language server</th></tr>
               </thead>
               <tbody>
-                <tr><td><strong>Rust</strong></td><td><code>.rs</code></td><td><code>rust-analyzer</code></td></tr>
-                <tr><td><strong>Go</strong></td><td><code>.go</code></td><td><code>gopls</code></td></tr>
-                <tr><td><strong>TypeScript / JavaScript</strong></td><td><code>.ts .tsx .js .jsx .mjs .cjs</code></td><td><code>vtsls</code> or <code>typescript-language-server --stdio</code></td></tr>
-                <tr><td><strong>Python</strong></td><td><code>.py</code></td><td><code>pylsp</code> or <code>pyright-langserver --stdio</code></td></tr>
-                <tr><td><strong>C / C++</strong></td><td><code>.c .h .cpp .hpp .cc .cxx</code></td><td><code>clangd</code></td></tr>
-                <tr><td><strong>HTML</strong></td><td><code>.html .htm</code></td><td><code>vscode-html-language-server --stdio</code></td></tr>
-                <tr><td><strong>CSS / SCSS</strong></td><td><code>.css .scss</code></td><td><code>vscode-css-language-server --stdio</code></td></tr>
-                <tr><td><strong>JSON / JSONC</strong></td><td><code>.json .jsonc</code></td><td><code>vscode-json-language-server --stdio</code></td></tr>
-                <tr><td><strong>YAML</strong></td><td><code>.yaml .yml</code></td><td><code>yaml-language-server --stdio</code></td></tr>
-                <tr><td><strong>TOML</strong></td><td><code>.toml</code>, <code>Cargo.toml</code>, <code>config</code></td><td><code>taplo lsp stdio</code></td></tr>
-                <tr><td><strong>Shell</strong></td><td><code>.sh .bash .zsh</code>, <code>Dockerfile</code></td><td><code>bash-language-server start</code></td></tr>
-                <tr><td><strong>Markdown</strong></td><td><code>.md .markdown</code></td><td><code>marksman server</code></td></tr>
-                <tr><td><strong>Plain text</strong></td><td>Anything else</td><td>—</td></tr>
+                <tr><td><strong>Rust</strong></td><td><code>rust-analyzer</code></td></tr>
+                <tr><td><strong>TypeScript / JavaScript</strong></td><td><code>vtsls</code></td></tr>
+                <tr><td><strong>Python</strong></td><td><code>pyright</code> or <code>pylsp</code></td></tr>
+                <tr><td><strong>C / C++</strong></td><td><code>clangd</code></td></tr>
+                <tr><td><strong>HTML / CSS / JSON</strong></td><td><code>vscode-langservers-extracted</code></td></tr>
+                <tr><td><strong>Other languages</strong></td><td>Syntax highlighting without a server</td></tr>
               </tbody>
             </table>
           </div>
 
-          <h3>Language server behavior</h3>
-          <ul>
-            <li><strong>One server per language.</strong> A mixed workspace can run Rust, TypeScript, HTML, and CSS servers at the same time; each keeps its own project root and diagnostics.</li>
-            <li>Servers start automatically when a supported file is opened and communicate over stdio with JSON-RPC in background threads, so typing never blocks.</li>
-            <li>The client completes the LSP initialize handshake before sending document notifications, and answers server requests such as <code>client/registerCapability</code> and <code>workspace/configuration</code>.</li>
-            <li>Document open, change, save, and close notifications use monotonic revisions.</li>
-            <li>Completions and hover results are delivered asynchronously and matched to the file that requested them, so stale popups no longer appear.</li>
-            <li>Positions are converted between UTF-16 and shaped grapheme clusters, keeping diagnostics and hover correct for Myanmar and other non-ASCII text.</li>
-            <li>Errors and warnings render as colored gutter markers, Problems panel entries, and underline squiggles.</li>
-            <li>If no server binary is installed, editing still works: the status bar shows <code>LSP: &lt;server&gt; not found</code> and completion falls back to words already present in the buffer. Install the server and use the palette action <strong>LSP: Restart Language Server</strong>.</li>
-          </ul>
           <div class="docs-note">
-            <strong>Install examples:</strong>
-            <code>rustup component add rust-analyzer</code>,
-            <code>go install golang.org/x/tools/gopls@latest</code>,
-            <code>npm i -g vscode-langservers-extracted yaml-language-server</code>,
-            <code>npm i -g vtsls</code>,
-            <code>cargo install taplo-cli marksman</code>,
-            <code>npm i -g bash-language-server</code>,
-            plus your distribution's <code>clangd</code> and <code>python-lsp-server</code> packages.
+            Servers start automatically when a supported file opens. If one is missing, editing still works and
+            completion falls back to words already in the file.
           </div>
         </section>
 
         <section class="docs-section" id="myanmar">
           <h2>Myanmar editing</h2>
           <p>
-            The editor does not treat text as isolated codepoints. Lines are segmented with
-            <code>unicode-segmentation</code> and shaped with <code>rustybuzz</code>, so the cursor, selection, and
-            deletion all respect complete Burmese grapheme clusters.
+            Burmese syllables stay together while you type, move the cursor, select, and delete.
           </p>
           <div class="myanmar-specimen" style="margin: 1.1rem 0">
             <div class="specimen-row">
-              <div class="specimen-tag">Kinzi + Tall AA</div>
+              <div class="specimen-tag">Everyday text</div>
               <div class="specimen-text">မင်္ဂလာပါ — မြန်မာဘာသာစကား</div>
             </div>
             <div class="specimen-row">
-              <div class="specimen-tag">Stacked Consonants &amp; Medials</div>
+              <div class="specimen-tag">Stacked consonants</div>
               <div class="specimen-text">ပြည်ထောင်စု • ဗုဒ္ဓဘာသာ • ဣန္ဒြေ • တက္ကသိုလ်</div>
-            </div>
-            <div class="specimen-row">
-              <div class="specimen-tag">Pre-base E + Medial Ra</div>
-              <div class="specimen-text">ကြွေးမြီ • ကြေ • မြေ</div>
             </div>
           </div>
           <ul>
-            <li><strong>Cluster cursor movement.</strong> Arrow keys step over a whole syllable instead of landing between a base consonant and its vowel or virama.</li>
-            <li><strong>Atomic deletion.</strong> <kbd>Backspace</kbd> and <kbd>Delete</kbd> remove composite clusters without leaving orphaned diacritics or dotted circles.</li>
-            <li><strong>UTN #11 normalization.</strong> Out-of-order typing such as <code>ကုိ</code> is normalized to <code>ကို</code>, and <code>ကေြ</code> to <code>ကြေ</code>.</li>
-            <li><strong>IME commits reach the document.</strong> Text composed by IBus, Fcitx, or Keyman is inserted at the editor caret instead of being sent to the shell.</li>
-            <li><strong>Visible preedit.</strong> Wayland (<code>zwp_text_input_v3</code>) and X11 (<code>XIM</code>) composition is rendered as a shaped pill at the editor cursor.</li>
-            <li><strong>Space and dead keys work.</strong> Space inserts a document space, and <code>event.text</code> fallbacks cover compose sequences and non-IME Burmese layouts.</li>
-            <li><strong>Vim-aware IME.</strong> With <code>editor-keymap = vim</code>, IME input is enabled only in Insert mode; Normal and Visual mode keys never leak into the terminal.</li>
-            <li><strong>Zawgyi-One display.</strong> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> toggles legacy log/file display without changing the underlying Unicode text.</li>
+            <li>Cursor movement and deletion work on complete syllables.</li>
+            <li>IBus, Fcitx, and Keyman input goes to the editor, not the shell.</li>
+            <li>Adjustable Myanmar font size and optional Zawgyi display.</li>
           </ul>
         </section>
 
         <section class="docs-section" id="plugins">
-          <h2>WASM plugins</h2>
+          <h2>Plugins</h2>
           <p>
-            Ocean embeds <code>extism</code> to run sandboxed WebAssembly plugins built for <code>wasm32-wasip1</code>.
-            Installed plugins live in <code>~/.config/ocean/plugins/&lt;id&gt;.wasm</code> with an optional
-            <code>&lt;id&gt;.json</code> manifest and a shared <code>registry.json</code> for enabled state.
+            Optional sandboxed plugins can add commands and status items. Install one from a local file or URL:
           </p>
-
-          <div class="docs-table-wrap">
-            <table class="docs-table">
-              <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
-              <tbody>
-                <tr><td><code>ocean +plugin-list</code></td><td>List installed plugins, versions, and enabled state</td></tr>
-                <tr><td><code>ocean +plugin-install &lt;file.wasm|https://...&gt;</code></td><td>Install a local or downloaded plugin (SHA-256 verified; <code>--force</code> overwrites)</td></tr>
-                <tr><td><code>ocean +plugin-enable/disable &lt;id&gt;</code></td><td>Toggle a plugin without removing it</td></tr>
-                <tr><td><code>ocean +plugin-remove &lt;id&gt;</code></td><td>Uninstall (<code>--force</code> when enabled)</td></tr>
-                <tr><td><code>ocean +plugin-info &lt;id&gt;</code></td><td>Show the manifest, version, source, and checksum</td></tr>
-                <tr><td><code>ocean +plugin-verify &lt;id&gt;</code></td><td>Recompute and compare the plugin checksum</td></tr>
-                <tr><td><code>ocean +plugin-update &lt;id&gt;</code></td><td>Reinstall from the recorded source</td></tr>
-                <tr><td><code>ocean +plugins-dir</code></td><td>Print the plugin directory</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="docs-table-wrap">
-            <table class="docs-table">
-              <thead>
-                <tr><th>Host function</th><th>Signature</th><th>Purpose</th></tr>
-              </thead>
-              <tbody>
-                <tr><td><code>ocean_get_buffer_slice</code></td><td><code>(offset: i64, len: i64) -&gt; String</code></td><td>Read a byte range from the active buffer</td></tr>
-                <tr><td><code>ocean_insert_text</code></td><td><code>(offset: i64, text: String)</code></td><td>Queue text insertion at a character offset</td></tr>
-                <tr><td><code>ocean_register_command</code></td><td><code>(name: String, callback: String)</code></td><td>Expose a command in the <kbd>Ctrl</kbd>+<kbd>P</kbd> palette</td></tr>
-                <tr><td><code>ocean_add_status_item</code></td><td><code>(text: String)</code></td><td>Add a persistent label to the editor status bar</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <ul>
-            <li>Pending insertions are applied safely on the main thread and clamped to the buffer length.</li>
-            <li>Registered commands run their callback function when selected from the command palette.</li>
-            <li>Status items appear next to the LSP state in the editor status bar.</li>
-            <li>Reload plugins without restarting via the palette action <strong>Plugins: Reload WASM Plugins</strong>.</li>
-          </ul>
-
           <div class="code-card">
-            <div class="code-card-header">
-              <span>Plugin location</span>
-              <span>wasm32-wasip1</span>
-            </div>
-            <pre><span class="tok-comment"># Sandboxed plugins are loaded from:</span>
-<span class="tok-key">~/.config/ocean/plugins/</span>
-    format.wasm
-    linter.wasm
-    snippets.wasm</pre>
+            <pre><span class="tok-cmd">ocean</span> <span class="tok-flag">+plugin-install</span> plugin.wasm
+<span class="tok-cmd">ocean</span> <span class="tok-flag">+plugin-list</span></pre>
           </div>
+          <p>Enable, disable, or remove plugins from the Plugins panel.</p>
         </section>
 
         <section class="docs-section" id="mouse">
@@ -526,14 +383,11 @@
                 <tr><th>Interaction</th><th>Behavior</th></tr>
               </thead>
               <tbody>
-                <tr><td>Single click</td><td>Place the cursor at the clicked cluster</td></tr>
-                <tr><td>Click + drag</td><td>Cluster-aware text selection</td></tr>
-                <tr><td>Double click</td><td>Select the word under the pointer</td></tr>
-                <tr><td>Triple click</td><td>Select the entire line</td></tr>
-                <tr><td>Mouse wheel</td><td>Scroll the buffer (or the file explorer when hovering it)</td></tr>
-                <tr><td>Drag split divider</td><td>Resize Mode B between editor and terminal</td></tr>
-                <tr><td>Drag explorer edge</td><td>Resize the file explorer sidebar</td></tr>
-                <tr><td>Click a document tab</td><td>Switch the active document</td></tr>
+                <tr><td>Single click</td><td>Place the cursor</td></tr>
+                <tr><td>Click + drag</td><td>Select text</td></tr>
+                <tr><td>Double click</td><td>Select the word</td></tr>
+                <tr><td>Mouse wheel</td><td>Scroll the editor or file explorer</td></tr>
+                <tr><td>Drag a divider</td><td>Resize the editor or sidebar</td></tr>
               </tbody>
             </table>
           </div>
@@ -571,9 +425,8 @@
           </div>
 
           <ul>
-            <li>Changes hot-reload when you save the config, or immediately with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>,</kbd>.</li>
-            <li>Validate syntax anytime with <code>ocean +validate-config</code>, or inspect resolved values with <code>ocean +show-config</code>.</li>
-            <li>Per-document state — cursor, scroll position, language, and undo history — is kept while the tab stays open.</li>
+            <li>Changes apply live when you save the config.</li>
+            <li>Validate with <code>ocean +validate-config</code> or inspect with <code>ocean +show-config</code>.</li>
           </ul>
 
           <div class="docs-next">

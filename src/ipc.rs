@@ -18,6 +18,18 @@ pub struct IpcEditorRequest {
     pub cwd: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpcSplitRequest {
+    pub pane_id: u64,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub direction: Option<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
 pub fn socket_path() -> PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -37,10 +49,17 @@ pub fn start_listener(proxy: EventLoopProxy<AppEvent>) -> std::io::Result<PathBu
                 continue;
             };
             let mut line = String::new();
-            if BufReader::new(stream).read_line(&mut line).is_ok()
-                && let Ok(request) = serde_json::from_str::<IpcEditorRequest>(line.trim())
-            {
-                let _ = proxy.send_event(AppEvent::IpcEditorRequest(request));
+            if BufReader::new(stream).read_line(&mut line).is_ok() {
+                let trimmed = line.trim();
+                if let Ok(split_req) = serde_json::from_str::<IpcSplitRequest>(trimmed) {
+                    if !split_req.command.is_empty() {
+                        let _ = proxy.send_event(AppEvent::IpcSplitRequest(split_req));
+                        continue;
+                    }
+                }
+                if let Ok(request) = serde_json::from_str::<IpcEditorRequest>(trimmed) {
+                    let _ = proxy.send_event(AppEvent::IpcEditorRequest(request));
+                }
             }
         }
     });
@@ -119,6 +138,48 @@ pub fn try_send_edit_request(path: Option<&Path>) -> bool {
     }
 }
 
+/// Ask the Ocean instance that owns the current shell pane to split and launch a command.
+/// Falls back to the newest Ocean window if invoked without pane context.
+pub fn try_send_split_request(
+    command: &str,
+    args: &[String],
+    direction: Option<&str>,
+    cwd: Option<&Path>,
+) -> bool {
+    let socket_from_env = std::env::var_os("OCEAN_SOCKET").map(PathBuf::from);
+    let pane_id = std::env::var("OCEAN_PANE_ID")
+        .unwrap_or_default()
+        .parse::<u64>()
+        .unwrap_or(0);
+
+    let Some(socket) = socket_from_env.or_else(newest_running_socket) else {
+        return false;
+    };
+
+    let cwd_path = cwd
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok());
+
+    let request = IpcSplitRequest {
+        pane_id,
+        command: command.to_string(),
+        args: args.to_vec(),
+        direction: direction.map(|s| s.to_string()),
+        cwd: cwd_path.map(|p| p.to_string_lossy().into_owned()),
+    };
+
+    let Ok(mut stream) = UnixStream::connect(socket) else {
+        return false;
+    };
+    if serde_json::to_writer(&mut stream, &request).is_ok() {
+        let _ = stream.write_all(b"\n");
+        let _ = stream.flush();
+        true
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,5 +195,22 @@ mod tests {
         let decoded: IpcEditorRequest = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded.pane_id, 42);
         assert_eq!(decoded.path.as_deref(), Some("/tmp/hello world.rs"));
+    }
+
+    #[test]
+    fn split_request_round_trips_through_json() {
+        let request = IpcSplitRequest {
+            pane_id: 17,
+            command: "ocean".to_string(),
+            args: vec!["file".to_string(), "sample.pdf".to_string()],
+            direction: Some("right".to_string()),
+            cwd: Some("/home".to_string()),
+        };
+        let encoded = serde_json::to_string(&request).expect("encode");
+        let decoded: IpcSplitRequest = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded.pane_id, 17);
+        assert_eq!(decoded.command, "ocean");
+        assert_eq!(decoded.args.len(), 2);
+        assert_eq!(decoded.direction.as_deref(), Some("right"));
     }
 }

@@ -253,9 +253,10 @@ impl ContextMenu {
     pub fn hovered_theme_id(&self) -> Option<&'static str> {
         if self.submenu_open
             && let Some(sub_idx) = self.sub_hovered
-            && let Some(ThemeSubEntry::Theme(info)) = self.sub_entries.get(sub_idx) {
-                return Some(info.id);
-            }
+            && let Some(ThemeSubEntry::Theme(info)) = self.sub_entries.get(sub_idx)
+        {
+            return Some(info.id);
+        }
         None
     }
 

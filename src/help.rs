@@ -664,8 +664,8 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
         2 => &[
             RawDocItem::Heading("Default Developer Keyboard Shortcuts"),
             RawDocItem::KeyValue(
-                "Ctrl+Shift+P / Menu",
-                "Open/close Context Menu at cursor (j/k/t/1-9)",
+                "Ctrl+Shift+P / Menu (terminal focus)",
+                "Open/close Context Menu at cursor (editor focus: command palette)",
             ),
             RawDocItem::KeyValue(
                 "Ctrl+Shift+B",
@@ -710,6 +710,10 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "Switch this window into editor mode without opening a new window",
             ),
             RawDocItem::KeyValue(
+                "file [path] / file [url]",
+                "Open file viewer (PDF auto-splits pane, MD view mode, media/YouTube player)",
+            ),
+            RawDocItem::KeyValue(
                 "Dirty close / quit",
                 "Prompts Save / Discard / Cancel; :q! is the explicit force-discard",
             ),
@@ -718,8 +722,13 @@ fn section_content(tab: usize) -> &'static [RawDocItem] {
                 "File / Edit / View / Go / Help menus with recent files and quick open",
             ),
             RawDocItem::KeyValue(
-                "Ctrl+P / Ctrl+F",
-                "Bottom `:` command palette / bottom `/` in-file search line",
+                "F1 / Ctrl+P / Ctrl+Shift+P",
+                "Open Help & Shortcuts / bottom `:` command palette (editor focus)",
+            ),
+            RawDocItem::KeyValue("Ctrl+F", "Bottom `/` in-file search line"),
+            RawDocItem::KeyValue(
+                "Alt+1..5 (editor)",
+                "Explorer / Search / Problems / Plugins / Git panels",
             ),
             RawDocItem::KeyValue(
                 "Ctrl+Shift+F / Ctrl+Enter",
